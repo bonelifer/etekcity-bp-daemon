@@ -1,0 +1,8 @@
+[Unit]
+Description=Check Etekcity blood pressure readings for stale/crisis-range/irregular-heartbeat conditions
+
+[Service]
+Type=oneshot
+User=etekcity-bp-daemon
+Group=etekcity-bp-daemon
+ExecStart=/usr/bin/etekcity-bp-alert-check --config /etc/etekcity-bp-daemon/config.ini

@@ -1,0 +1,8 @@
+[Unit]
+Description=Generate a scheduled Etekcity blood pressure report
+
+[Service]
+Type=oneshot
+User=etekcity-bp-daemon
+Group=etekcity-bp-daemon
+ExecStart=/usr/bin/etekcity-bp-generate-report

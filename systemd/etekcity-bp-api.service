@@ -1,0 +1,14 @@
+[Unit]
+Description=Etekcity blood pressure HTTP API (latest reading / on-demand report)
+After=etekcity-bp-daemon.service
+
+[Service]
+Type=simple
+User=etekcity-bp-daemon
+Group=etekcity-bp-daemon
+ExecStart=/usr/bin/etekcity-bp-api --config /etc/etekcity-bp-daemon/config.ini
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

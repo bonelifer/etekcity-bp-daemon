@@ -1,0 +1,18 @@
+[Unit]
+Description=Etekcity blood pressure monitor BLE logging daemon
+After=bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+User=etekcity-bp-daemon
+Group=etekcity-bp-daemon
+SupplementaryGroups=bluetooth
+ExecStart=/usr/bin/etekcity-bp-daemon --config /etc/etekcity-bp-daemon/config.ini
+Restart=on-failure
+RestartSec=5
+StateDirectory=etekcity-bp-daemon
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
