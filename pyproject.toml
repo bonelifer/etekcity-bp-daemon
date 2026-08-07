@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "etekcity-bp-daemon"
+version = "0.1.0"
+description = "Standalone Linux daemon that logs Etekcity blood pressure monitor readings"
+readme = "README.md"
+license = "GPL-3.0-only"
+requires-python = ">=3.11"
+dependencies = [
+    "etekcity-bp-ble @ git+https://github.com/bonelifer/etekcity-bp-ble.git",
+]
+
+[project.urls]
+Homepage = "https://github.com/bonelifer/etekcity-bp-daemon"
+
+[project.scripts]
+etekcity-bp-daemon = "etekcity_bp_daemon.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "flake8>=7.0.0",
+    "pytest>=8.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/etekcity_bp_daemon"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

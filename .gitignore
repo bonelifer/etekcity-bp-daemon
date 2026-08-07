@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+
+# Live config seeded from config/etekcity-bp-daemon.ini.example
+config/etekcity-bp-daemon.ini
+
+# Local SQLite database and logs produced by running the daemon
+*.db
+*.db-journal
+*.log
