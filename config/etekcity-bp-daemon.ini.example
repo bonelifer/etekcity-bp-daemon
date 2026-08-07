@@ -101,11 +101,40 @@ port = 8080
 token =
 
 [profiles]
-# Give the device's two hardware user slots real names. Unlike a shared
-# scale, this device already tags every reading with a user slot at the
-# protocol level, so there's no "who was this?" guessing -- position 0
-# below is User 1, position 1 is User 2. Defaults to no (readings show as
-# "User 1"/"User 2" in reports and the API).
+# Ask "who was this?" for each reading, for a device shared by more than
+# one person. The device's own user slot (0/1) can't be used for this --
+# it only ever reports one of two values no matter how many people actually
+# share the device, so it can't tell a third or fourth person apart from
+# whoever normally uses that slot. Defaults to no. Two delivery paths,
+# chosen automatically:
+#   - If [api] is enabled: an ntfy notification (Android/iOS apps, or any
+#     browser) with one HTTP action button per name below, each calling
+#     back into this API's /assign-profile endpoint when tapped. Needs
+#     ntfy_url set.
+#   - If [api] is disabled: a local dunstify prompt instead, since ntfy's
+#     action buttons would have nothing to call back to. Needs dunstify
+#     (part of the dunst notification daemon) and a real desktop/D-Bus
+#     session -- this won't reach anywhere from a headless system service
+#     without one, so it's mainly useful running the daemon on your own
+#     desktop/laptop rather than an unattended Pi.
 enabled = no
-# Comma-separated list of up to 2 names.
+# Comma-separated list of names to choose between. No limit -- unlike the
+# device's own user slots, any number of people can share the tagging.
 names =
+# Required only when [api] is enabled: an ntfy topic URL, e.g.
+# https://ntfy.sh/your-topic or a self-hosted https://ntfy.example.com/your-topic.
+ntfy_url =
+# Optional access token, if your ntfy server/topic requires auth.
+ntfy_token =
+# Where this API is reachable, for the ntfy action buttons to call back
+# into. Only used when [api] is enabled.
+api_base_url = http://127.0.0.1:8080
+# Seconds to wait for a dunstify response before giving up. Only used
+# when [api] is disabled.
+dunstify_timeout_seconds = 30
+# Reject /assign-profile requests tagging a reading older than this many
+# seconds, unless &confirm=1 is also passed. Guards against a delayed
+# ntfy notification -- tapped long after it was sent, once connectivity
+# returns -- silently tagging a now-stale reading. 0 disables the check
+# (the default). Only relevant when [api] is enabled.
+assign_window_seconds = 0

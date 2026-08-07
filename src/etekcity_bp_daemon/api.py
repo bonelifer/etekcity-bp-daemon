@@ -12,13 +12,21 @@ import argparse
 import os
 import sqlite3
 import tempfile
+from datetime import datetime, timezone
 
 from aiohttp import web
 
 from ._version import __version__
-from .config import ApiConfig, ConfigError, load_api_config, load_config, load_report_config
+from .config import (
+    ApiConfig,
+    ConfigError,
+    load_api_config,
+    load_config,
+    load_profiles_config,
+    load_report_config,
+)
 from .report import _resolve_range, build_csv, build_pdf, fetch_rows
-from .storage import ensure_schema
+from .storage import ensure_schema, get_reading_recorded_at, set_reading_profile
 
 _VALID_FORMATS = ("pdf", "csv")
 _VALID_PERIODS = ("7d", "30d", "90d", "1y", "all")
@@ -122,6 +130,67 @@ async def handle_latest(request: web.Request) -> web.Response:
     return web.json_response(readings)
 
 
+async def handle_assign_profile(request: web.Request) -> web.Response:
+    """POST /assign-profile?id=...&profile=...[&confirm=1] -- tag a reading.
+
+    Accepts GET too, since notification action buttons (ntfy's http action
+    in particular) are simplest to configure as a bare URL hit rather than
+    a POST with a body.
+
+    If ``profiles.assign_window_seconds`` is set, tagging a reading older
+    than that window is rejected unless ``confirm=1`` is also passed. This
+    guards against a delayed ntfy notification -- tapped long after it was
+    sent, once connectivity returns -- silently tagging a now-stale reading
+    that's no longer what the person meant to answer for. Deliberate manual
+    corrections (see the README) just add ``&confirm=1``.
+    """
+    unauthorized = _require_auth(request)
+    if unauthorized is not None:
+        return unauthorized
+
+    profiles_config = request.app["profiles_config"]
+    profile = request.query.get("profile", "")
+    if profile not in profiles_config.names:
+        return web.json_response(
+            {"error": f"profile must be one of {profiles_config.names}"}, status=400
+        )
+
+    row_id_raw = request.query.get("id", "")
+    try:
+        row_id = int(row_id_raw)
+    except ValueError:
+        return web.json_response({"error": "id must be an integer"}, status=400)
+
+    db_path = request.app["db_path"]
+    recorded_at_raw = get_reading_recorded_at(db_path, row_id)
+    if recorded_at_raw is None:
+        return web.json_response({"error": f"no reading with id {row_id}"}, status=404)
+
+    window = profiles_config.assign_window_seconds
+    confirmed = request.query.get("confirm") == "1"
+    if window and not confirmed:
+        age_seconds = (
+            datetime.now(timezone.utc) - datetime.fromisoformat(recorded_at_raw)
+        ).total_seconds()
+        if age_seconds > window:
+            return web.json_response(
+                {
+                    "error": (
+                        f"reading {row_id} is {age_seconds:.0f}s old, older than "
+                        f"profiles.assign_window_seconds ({window}s) -- likely a "
+                        "delayed notification tap rather than the intended "
+                        "reading; pass &confirm=1 to tag it anyway"
+                    )
+                },
+                status=409,
+            )
+
+    updated = set_reading_profile(db_path, row_id, profile)
+    if not updated:
+        return web.json_response({"error": f"no reading with id {row_id}"}, status=404)
+    return web.json_response({"status": "ok", "id": row_id, "profile": profile})
+
+
 async def handle_report(request: web.Request) -> web.Response:
     """GET /report[?format=pdf|csv&period=...&from=...&to=...&address=...&profile=...].
 
@@ -179,13 +248,16 @@ async def handle_report(request: web.Request) -> web.Response:
     )
 
 
-def build_app(db_path: str, api_config: ApiConfig, report_config) -> web.Application:
+def build_app(
+    db_path: str, api_config: ApiConfig, report_config, profiles_config
+) -> web.Application:
     """Build the aiohttp application with routes and shared state attached.
 
     Args:
         db_path: Path to the SQLite database file.
         api_config: Supplies the auth token.
         report_config: Used for on-demand report generation.
+        profiles_config: Supplies the valid profile names for /assign-profile.
 
     Returns:
         A configured, unstarted aiohttp Application.
@@ -194,9 +266,12 @@ def build_app(db_path: str, api_config: ApiConfig, report_config) -> web.Applica
     app["db_path"] = db_path
     app["api_token"] = api_config.token
     app["report_config"] = report_config
+    app["profiles_config"] = profiles_config
     app.router.add_get("/health", handle_health)
     app.router.add_get("/latest", handle_latest)
     app.router.add_get("/report", handle_report)
+    app.router.add_get("/assign-profile", handle_assign_profile)
+    app.router.add_post("/assign-profile", handle_assign_profile)
     return app
 
 
@@ -234,6 +309,7 @@ def main(argv: list[str] | None = None) -> int:
         db_path = load_config(args.config).db_path
         api_config = load_api_config(args.config)
         report_config = load_report_config(args.config)
+        profiles_config = load_profiles_config(args.config)
     except ConfigError as exc:
         print(f"Error: {exc}")
         return 1
@@ -243,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     ensure_schema(db_path)
-    app = build_app(db_path, api_config, report_config)
+    app = build_app(db_path, api_config, report_config, profiles_config)
     print(f"Listening on http://{api_config.host}:{api_config.port}")
     web.run_app(app, host=api_config.host, port=api_config.port, print=None)
     return 0

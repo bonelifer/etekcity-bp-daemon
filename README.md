@@ -34,9 +34,9 @@ protocol may work.
 - Optional Apprise-based alerting on stale data, hypertensive-crisis-range
   readings, or an irregular heartbeat
 - Optional read-only HTTP API and MQTT publishing
-- The device's two hardware user slots can be given real names, with no
-  runtime "who was this?" prompting -- readings are already tagged by user
-  slot at the protocol level
+- Optional "who was this?" profile tagging for a device shared by more than
+  two people, via ntfy or dunstify -- not limited to the device's own
+  two-slot user distinction
 
 ## Installation
 
@@ -179,6 +179,7 @@ Endpoints:
 | `GET /health` | Unauthenticated liveness check: `{"status": "ok", "version": "..."}`. |
 | `GET /latest[?address=...&profile=...]` | Most recent reading per user slot, as JSON. |
 | `GET /report[?format=pdf\|csv&period=...&from=...&to=...&address=...&profile=...]` | Generates a report on demand using the same `[report]` config as `etekcity-bp-report`, returned as a file download. |
+| `GET`/`POST /assign-profile?id=...&profile=...[&confirm=1]` | Tags a reading with a profile name (see [Profiles](#profiles)). |
 
 ```bash
 curl http://127.0.0.1:8080/latest
@@ -198,22 +199,57 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/latest
 
 ### Profiles
 
-The device has two hardware user slots (User 1 / User 2) and already tags
-every reading with the slot it came from at the protocol level -- there's
-no camera, button, or guesswork involved like a shared scale needs.
-`[profiles]` just gives those slots real names for reports and the API:
+For a device shared by more than one person: `[profiles]` asks "who was
+this?" after each reading and tags it. The device's own user slot (0 or 1)
+can't be used for this -- it only ever reports one of two values no matter
+how many people actually share the device, so it can't tell a third or
+fourth person apart from whoever normally uses that slot. This mirrors
+[`etekcity-scale-daemon`](https://github.com/bonelifer/etekcity-scale-daemon)'s
+profile system rather than relying on the device's hardware slots, so any
+number of people can share one monitor.
 
 ```ini
 [profiles]
 enabled = yes
-names = Alice, Bob
+names = Alice, Bob, Charlie
 ```
 
-Position 0 is User 1, position 1 is User 2. `--check-config` cross-checks
-`profiles.names` against the database: if a name was removed or renamed but
-readings tagged with the old name still exist, it prints a warning (not an
-error; the exit code stays `0`) so that history doesn't just silently stop
-being explainable.
+Two delivery paths, chosen automatically based on whether `[api]` is enabled:
+
+- **`[api]` enabled**: an [ntfy](https://ntfy.sh) notification (Android/iOS
+  apps, or any browser) with one HTTP action button per name in
+  `profiles.names`. Tapping a button hits this API's `/assign-profile`
+  endpoint directly, tagging that specific reading. Requires
+  `profiles.ntfy_url` (and `profiles.api_base_url` pointing at wherever the
+  API is actually reachable from your phone/desktop; `127.0.0.1` only works
+  if ntfy and the API run on the same machine).
+- **`[api]` disabled**: a local [dunstify](https://dunst-project.org) prompt
+  instead, since ntfy's action buttons would have nothing to call back to
+  without the API running. This resolves synchronously and tags the reading
+  directly, no network round-trip. It needs the `dunst` notification daemon
+  and a real desktop/D-Bus session, which makes it a better fit for running
+  the daemon on your own desktop or laptop than an unattended headless Pi
+  (the usual deployment for this daemon) -- ntfy is the practical choice
+  there.
+
+```bash
+curl "http://127.0.0.1:8080/assign-profile?id=42&profile=Alice"
+```
+
+If `profiles.assign_window_seconds` is set, this fails with `409` for a
+reading older than that window: a safety net for delayed ntfy notifications
+(tapped long after connectivity returns, potentially tagging a now-stale
+reading someone's forgotten about) rather than a limit on manual
+corrections. Add `&confirm=1` to tag an old reading on purpose:
+
+```bash
+curl "http://127.0.0.1:8080/assign-profile?id=42&profile=Alice&confirm=1"
+```
+
+`--check-config` cross-checks `profiles.names` against the database: if a
+name was removed or renamed but readings tagged with the old name still
+exist, it prints a warning (not an error; the exit code stays `0`) so that
+history doesn't just silently stop being explainable.
 
 ### Docker
 
@@ -254,7 +290,7 @@ One `readings` table, one row per completed measurement:
 | `recorded_at` | TEXT | ISO-8601 UTC timestamp |
 | `address` | TEXT | Device BLE address |
 | `user` | INTEGER | Device user slot (0 or 1) |
-| `profile` | TEXT | Mapped profile name, if `[profiles]` is enabled |
+| `profile` | TEXT | Tagged profile name (see [Profiles](#profiles)), NULL until answered |
 | `systolic_mmhg`, `diastolic_mmhg` | INTEGER | Pressure in mmHg |
 | `systolic_kpa`, `diastolic_kpa` | REAL | Pressure in kPa |
 | `pulse_bpm` | INTEGER | Pulse rate |

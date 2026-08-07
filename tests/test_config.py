@@ -116,21 +116,42 @@ def test_load_api_config_defaults(tmp_path):
     assert api.port == 8080
 
 
-def test_load_profiles_config_max_two_names(tmp_path):
+def test_load_profiles_config_more_than_two_names_allowed(tmp_path):
     config_path = _write(
-        tmp_path, _BASE_CONFIG + "\n[profiles]\nenabled = yes\nnames = A, B, C\n"
+        tmp_path, _BASE_CONFIG + "\n[profiles]\nenabled = yes\nnames = A, B, C, D\n"
     )
-    with pytest.raises(ConfigError):
-        load_profiles_config(config_path)
+    profiles = load_profiles_config(config_path)
+    assert profiles.names == ["A", "B", "C", "D"]
 
 
 def test_load_profiles_config_valid(tmp_path):
     config_path = _write(
-        tmp_path, _BASE_CONFIG + "\n[profiles]\nenabled = yes\nnames = Alice, Bob\n"
+        tmp_path,
+        _BASE_CONFIG
+        + "\n[profiles]\nenabled = yes\nnames = Alice, Bob\n"
+        "ntfy_url = https://ntfy.sh/topic\nassign_window_seconds = 120\n",
     )
     profiles = load_profiles_config(config_path)
     assert profiles.enabled is True
     assert profiles.names == ["Alice", "Bob"]
+    assert profiles.ntfy_url == "https://ntfy.sh/topic"
+    assert profiles.assign_window_seconds == 120
+
+
+def test_load_profiles_config_requires_names_when_enabled(tmp_path):
+    config_path = _write(tmp_path, _BASE_CONFIG + "\n[profiles]\nenabled = yes\n")
+    with pytest.raises(ConfigError):
+        load_profiles_config(config_path)
+
+
+def test_load_profiles_config_invalid_assign_window(tmp_path):
+    config_path = _write(
+        tmp_path,
+        _BASE_CONFIG + "\n[profiles]\nenabled = yes\nnames = Alice\n"
+        "assign_window_seconds = -5\n",
+    )
+    with pytest.raises(ConfigError):
+        load_profiles_config(config_path)
 
 
 def test_persist_discovered_address(tmp_path):

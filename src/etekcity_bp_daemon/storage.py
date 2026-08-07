@@ -67,6 +67,49 @@ def get_distinct_profiles(db_path: str) -> set[str]:
         connection.close()
 
 
+def get_reading_recorded_at(db_path: str, row_id: int) -> str | None:
+    """Look up a reading's recorded_at timestamp, without modifying it.
+
+    Args:
+        db_path: Filesystem path to the SQLite database file.
+        row_id: The reading's primary key, as returned by ``record()``.
+
+    Returns:
+        The stored ISO-8601 ``recorded_at`` string, or None if no row
+        matches ``row_id``.
+    """
+    connection = sqlite3.connect(db_path)
+    try:
+        row = connection.execute(
+            "SELECT recorded_at FROM readings WHERE id = ?", (row_id,)
+        ).fetchone()
+        return row[0] if row is not None else None
+    finally:
+        connection.close()
+
+
+def set_reading_profile(db_path: str, row_id: int, profile: str) -> bool:
+    """Tag a previously recorded reading with a profile name.
+
+    Args:
+        db_path: Filesystem path to the SQLite database file.
+        row_id: The reading's primary key, as returned by ``record()``.
+        profile: The profile name to assign.
+
+    Returns:
+        True if a row was updated, False if no row matched ``row_id``.
+    """
+    connection = sqlite3.connect(db_path)
+    try:
+        cursor = connection.execute(
+            "UPDATE readings SET profile = ? WHERE id = ?", (profile, row_id)
+        )
+        connection.commit()
+        return cursor.rowcount > 0
+    finally:
+        connection.close()
+
+
 class ReadingStore:
     """Persists blood pressure readings to a local SQLite database.
 
