@@ -19,7 +19,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Lint
-        run: flake8 --config .flake8 src
+        run: flake8 --config .flake8 src tests
 
       - name: Test
         run: pytest -q

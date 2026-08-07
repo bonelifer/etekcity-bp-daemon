@@ -1,0 +1,111 @@
+[monitor]
+# Leave address empty to auto-discover the device on first run (power it on
+# with the MEM button while the daemon is scanning). Once discovered, this
+# file is updated automatically so future restarts reconnect directly
+# instead of scanning again.
+address =
+
+# Optional BLE adapter to use, e.g. hci0 (Linux only). Leave empty for the
+# system default adapter.
+adapter =
+
+# Seconds to ignore advertisements after a disconnection, so a device still
+# finishing its own disconnect handshake doesn't trigger a reconnect storm.
+cooldown_seconds = 5
+
+[storage]
+# Path to the SQLite database file where readings are recorded.
+db_path = /var/lib/etekcity-bp-daemon/readings.db
+
+[daemon]
+# Logging level: DEBUG, INFO, WARNING, ERROR
+log_level = INFO
+
+[report]
+# Include the device's BLE address as a column/field.
+include_address = yes
+
+# Show which profile (or "User N" if unset) each reading belongs to.
+include_profile = no
+
+# Print an avg/min/max summary and AHA category breakdown below the title.
+include_summary = yes
+
+# Shade each table row by AHA blood-pressure category (normal/elevated/
+# stage 1/stage 2/hypertensive crisis) and include a Category column.
+include_categories = yes
+
+# Unit to render pressure values in: mmhg or kpa. Stored readings always
+# include both; this only affects report display.
+unit = mmhg
+
+# Date/time format: us (MM/DD/YYYY, 12-hour) or world (DD/MM/YYYY, 24-hour)
+date_format = world
+
+# PDF page size: letter or a4
+page_size = letter
+
+[mqtt]
+# Publish each reading to an MQTT broker as JSON. Defaults to no. A broker
+# outage is logged and non-fatal -- it never blocks local recording.
+enabled = no
+# Required if enabled = yes.
+host =
+port = 1883
+# Optional broker credentials; leave blank if not required.
+username =
+password =
+# yes or no -- wraps the connection in TLS
+use_tls = no
+# Messages publish to <topic_prefix>/<device address>/state
+topic_prefix = etekcity_bp_daemon
+# 0, 1, or 2
+qos = 0
+# yes or no -- whether the broker retains the last message for new subscribers
+retain = yes
+
+[alerting]
+# Notify via Apprise (https://github.com/caronc/apprise) on staleness,
+# hypertensive-crisis-range readings, or an irregular heartbeat flag.
+# Checked by etekcity-bp-alert-check, run periodically (see
+# etekcity-bp-alert-check.timer) -- nothing here runs automatically on its
+# own. Defaults to no.
+enabled = no
+# Comma-separated Apprise service URLs, e.g. tgram://bot_token/chat_id.
+# Required if enabled = yes.
+apprise_urls =
+# Alert if a user slot hasn't reported in this many days. 0 disables this check.
+stale_after_days = 0
+# Alert if the latest reading's systolic/diastolic is at or above these
+# thresholds (the AHA's hypertensive-crisis range starts above 180/120).
+# 0 disables the respective check.
+crisis_systolic_mmhg = 180
+crisis_diastolic_mmhg = 120
+# Alert when a reading's irregular-heartbeat flag is set. Defaults to no.
+alert_on_irregular_heartbeat = no
+# Where to persist per-user-slot alert state (throttling repeat alerts).
+state_path = /var/lib/etekcity-bp-daemon/alert-state.json
+
+[api]
+# Lightweight local HTTP API (etekcity-bp-api): GET /health, /latest, and
+# /report. Defaults to no. There's no TLS built in -- keep host bound to
+# loopback (the default) unless it sits behind a reverse proxy.
+enabled = no
+# Bind address. Change to 0.0.0.0 (or a specific interface) only if you
+# understand the exposure -- set token below if you do.
+host = 127.0.0.1
+port = 8080
+# Optional bearer token: if set, all endpoints except /health require an
+# "Authorization: Bearer <token>" header. Leave blank for no auth (fine
+# for loopback-only use).
+token =
+
+[profiles]
+# Give the device's two hardware user slots real names. Unlike a shared
+# scale, this device already tags every reading with a user slot at the
+# protocol level, so there's no "who was this?" guessing -- position 0
+# below is User 1, position 1 is User 2. Defaults to no (readings show as
+# "User 1"/"User 2" in reports and the API).
+enabled = no
+# Comma-separated list of up to 2 names.
+names =
