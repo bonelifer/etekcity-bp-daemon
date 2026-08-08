@@ -9,8 +9,8 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from xml.sax.saxutils import escape
 
-from reportlab.graphics.charts.linecharts import HorizontalLineChart
-from reportlab.graphics.shapes import Drawing, String
+from reportlab.graphics.charts.lineplots import LinePlot
+from reportlab.graphics.shapes import Drawing, Line, String
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, letter
 from reportlab.lib.styles import getSampleStyleSheet
@@ -449,31 +449,39 @@ def _range_str(values: list[float]) -> str:
 
 def _build_rollup_buckets(
     rows: list[ReportRow], period: str
-) -> dict[tuple[int, int], list[ReportRow]]:
-    """Group reading rows into weekly or monthly buckets, oldest bucket first.
+) -> dict[tuple[int, int, str], list[ReportRow]]:
+    """Group reading rows into per-person weekly or monthly buckets.
+
+    Bucketed by (period, person) rather than just period -- averaging two
+    different people's readings into one "week" row would be medically
+    meaningless, the same reasoning as the chart's per-person lines.
+    ``_who`` covers both tagged profiles and the untagged "User N" fallback,
+    so a device shared via hardware slots alone still gets split correctly.
 
     Args:
         rows: Reading rows to include, oldest first.
         period: "week" (ISO calendar week) or "month" (calendar month).
 
     Returns:
-        Bucket key -> rows in that bucket, in the same relative order as
-        ``rows`` (a plain dict preserves insertion order, and ``rows`` is
-        already oldest-first, so buckets come out oldest-first too).
+        (year, period-number, person) -> rows in that bucket, sorted
+        period-major then person-minor (not insertion order, since one
+        person's readings can interleave with another's across weeks).
     """
-    buckets: dict[tuple[int, int], list[ReportRow]] = {}
+    buckets: dict[tuple[int, int, str], list[ReportRow]] = {}
     for row in rows:
-        key = _rollup_key(row.recorded_at, period)
+        key = (*_rollup_key(row.recorded_at, period), _who(row))
         buckets.setdefault(key, []).append(row)
-    return buckets
+    return dict(sorted(buckets.items(), key=lambda item: item[0]))
 
 
 def _build_rollup_table(rows: list[ReportRow], report_config: ReportConfig) -> Table:
-    """Build the rollup layout: one row per week/month instead of per reading.
+    """Build the rollup layout: one row per week/month per person instead of per reading.
 
     Each row shows the reading count, avg/min/max systolic and diastolic,
     average pulse, and (if enabled) the worst AHA category seen in that
-    period -- a year of daily readings becomes ~52 rows instead of 365.
+    period -- a year of daily readings becomes ~52 rows instead of 365. A
+    "Who" column is included whenever the report spans more than one
+    person, so same-period rows for different people aren't indistinguishable.
 
     Args:
         rows: Reading rows to include, oldest first.
@@ -485,20 +493,26 @@ def _build_rollup_table(rows: list[ReportRow], report_config: ReportConfig) -> T
     """
     _, _, unit_label = _pressure_values(rows[0], report_config.unit)
     buckets = _build_rollup_buckets(rows, report_config.rollup_period)
+    multi_person = len({_who(row) for row in rows}) > 1
 
-    header = [
-        "Period",
-        "Readings",
-        f"Systolic\navg (min-max) {unit_label}",
-        f"Diastolic\navg (min-max) {unit_label}",
-        "Pulse avg\n(bpm)",
-    ]
+    header = ["Period"]
+    if multi_person:
+        header.append("Who")
+    header.extend(
+        [
+            "Readings",
+            f"Systolic\navg (min-max) {unit_label}",
+            f"Diastolic\navg (min-max) {unit_label}",
+            "Pulse avg\n(bpm)",
+        ]
+    )
     if report_config.include_categories:
         header.append("Worst\nCategory")
 
     data = [header]
     worst_categories: list[str | None] = []
     for key, bucket_rows in buckets.items():
+        period_key, who = key[:2], key[2]
         pairs = [_pressure_values(r, report_config.unit)[:2] for r in bucket_rows]
         systolic_values = [s for s, _ in pairs if s is not None]
         diastolic_values = [d for _, d in pairs if d is not None]
@@ -514,18 +528,23 @@ def _build_rollup_table(rows: list[ReportRow], report_config: ReportConfig) -> T
                 worst_category = category
         worst_categories.append(worst_category)
 
-        values: list[object] = [
-            _rollup_label(key, report_config.rollup_period),
-            len(bucket_rows),
-            _range_str(systolic_values),
-            _range_str(diastolic_values),
-            f"{sum(pulse_values) / len(pulse_values):.0f}" if pulse_values else "-",
-        ]
+        values: list[object] = [_rollup_label(period_key, report_config.rollup_period)]
+        if multi_person:
+            values.append(who)
+        values.extend(
+            [
+                len(bucket_rows),
+                _range_str(systolic_values),
+                _range_str(diastolic_values),
+                f"{sum(pulse_values) / len(pulse_values):.0f}" if pulse_values else "-",
+            ]
+        )
         if report_config.include_categories:
             values.append(worst_category or "-")
         data.append(values)
 
-    numeric_cols = [1, 2, 3, 4]
+    numeric_start = 2 if multi_person else 1
+    numeric_cols = list(range(numeric_start, numeric_start + 4))
     style_commands = _header_style_commands()
     style_commands.extend(("ALIGN", (idx, 1), (idx, -1), "RIGHT") for idx in numeric_cols)
     if report_config.include_categories:
@@ -542,8 +561,64 @@ def _build_rollup_table(rows: list[ReportRow], report_config: ReportConfig) -> T
     return table
 
 
+# (systolic color, diastolic color) per person, cycled if there are more
+# people than colors. The first pair matches the long-standing single-person
+# red/diastolic-blue convention.
+_CHART_COLOR_PAIRS = [
+    (colors.HexColor("#cc0000"), colors.HexColor("#2f5d8a")),
+    (colors.HexColor("#e69138"), colors.HexColor("#45818e")),
+    (colors.HexColor("#a64d79"), colors.HexColor("#6aa84f")),
+    (colors.HexColor("#674ea7"), colors.HexColor("#bf9000")),
+]
+
+_LEGEND_ROW_HEIGHT = 14
+_LEGEND_SWATCH_WIDTH = 14
+
+
+def _add_chart_legend(
+    drawing: Drawing, entries: list[tuple[str, tuple]], x: float, top_y: float
+) -> None:
+    """Draw one legend row per (person, (systolic_color, diastolic_color)) entry."""
+    for i, (person, (systolic_color, diastolic_color)) in enumerate(entries):
+        row_y = top_y - i * _LEGEND_ROW_HEIGHT
+        drawing.add(String(x, row_y, person, fontName="Helvetica-Bold", fontSize=8))
+        systolic_x = x + 65
+        drawing.add(
+            Line(
+                systolic_x,
+                row_y + 3,
+                systolic_x + _LEGEND_SWATCH_WIDTH,
+                row_y + 3,
+                strokeColor=systolic_color,
+                strokeWidth=3,
+            )
+        )
+        drawing.add(String(systolic_x + _LEGEND_SWATCH_WIDTH + 4, row_y, "Systolic", fontSize=8))
+        diastolic_x = systolic_x + _LEGEND_SWATCH_WIDTH + 58
+        drawing.add(
+            Line(
+                diastolic_x,
+                row_y + 3,
+                diastolic_x + _LEGEND_SWATCH_WIDTH,
+                row_y + 3,
+                strokeColor=diastolic_color,
+                strokeWidth=3,
+            )
+        )
+        drawing.add(String(diastolic_x + _LEGEND_SWATCH_WIDTH + 4, row_y, "Diastolic", fontSize=8))
+
+
 def _build_chart(rows: list[ReportRow], report_config: ReportConfig) -> Drawing:
     """Build a line chart of systolic and diastolic pressure over time.
+
+    One systolic/diastolic line pair per distinct person (see ``_who``),
+    each in its own color -- averaging or interleaving different people's
+    readings onto one line would be medically meaningless. All series
+    share a common numeric x-axis (days since the earliest reading in the
+    report) rather than a shared category-per-reading axis, so gaps in one
+    person's readings don't distort another's, and actual elapsed time
+    between readings is reflected instead of treating every reading as
+    equally spaced.
 
     Args:
         rows: Reading rows to include, oldest first.
@@ -553,68 +628,101 @@ def _build_chart(rows: list[ReportRow], report_config: ReportConfig) -> Drawing:
         A reportlab Drawing containing the chart, or just a "not enough
         data" note if fewer than two readings have pressure values.
     """
-    points = [
-        (row.recorded_at, *_pressure_values(row, report_config.unit)[:2])
-        for row in rows
-        if row.systolic_mmhg is not None and row.diastolic_mmhg is not None
+    valued_rows = [
+        row for row in rows if row.systolic_mmhg is not None and row.diastolic_mmhg is not None
     ]
     _, _, unit_label = _pressure_values(rows[0], report_config.unit) if rows else (None, None, "")
 
-    drawing = Drawing(480, 260)
-    if len(points) < 2:
+    if len(valued_rows) < 2:
+        drawing = Drawing(480, 260)
         drawing.add(String(10, 130, "Not enough pressure data to plot a chart."))
         return drawing
 
-    systolic_values = [point[1] for point in points]
-    diastolic_values = [point[2] for point in points]
-    date_pattern = "%m/%d" if report_config.date_format == "us" else "%d/%m"
-    date_labels = [point[0].astimezone().strftime(date_pattern) for point in points]
+    by_person: dict[str, list[ReportRow]] = {}
+    for row in valued_rows:
+        by_person.setdefault(_who(row), []).append(row)
+    people = sorted(by_person)
 
-    step = max(1, len(date_labels) // _CHART_MAX_LABELS)
-    thinned_labels = [label if i % step == 0 else "" for i, label in enumerate(date_labels)]
+    reference_date = valued_rows[0].recorded_at
 
-    chart = HorizontalLineChart()
+    def day_offset(row: ReportRow) -> float:
+        return (row.recorded_at - reference_date).total_seconds() / 86400
+
+    series_data = []
+    legend_entries = []
+    for i, person in enumerate(people):
+        systolic_color, diastolic_color = _CHART_COLOR_PAIRS[i % len(_CHART_COLOR_PAIRS)]
+        systolic_points = []
+        diastolic_points = []
+        for row in by_person[person]:
+            systolic, diastolic, _ = _pressure_values(row, report_config.unit)
+            x = day_offset(row)
+            systolic_points.append((x, systolic))
+            diastolic_points.append((x, diastolic))
+        series_data.append(systolic_points)
+        series_data.append(diastolic_points)
+        legend_entries.append((person, (systolic_color, diastolic_color)))
+
+    multi_person = len(people) > 1
+    legend_height = (len(people) * _LEGEND_ROW_HEIGHT + 10) if multi_person else 0
+    drawing = Drawing(480, 260 + legend_height)
+
+    chart = LinePlot()
     chart.x = 50
-    chart.y = 40
+    chart.y = 40 + legend_height
     chart.width = 400
     chart.height = 180
-    chart.data = [systolic_values, diastolic_values]
-    chart.categoryAxis.categoryNames = thinned_labels
-    chart.categoryAxis.labels.angle = 30
-    chart.categoryAxis.labels.dx = -8
-    chart.categoryAxis.labels.dy = -10
-    chart.categoryAxis.labels.fontSize = 7
-    all_values = systolic_values + diastolic_values
-    chart.valueAxis.valueMin = min(all_values) - 5
-    chart.valueAxis.valueMax = max(all_values) + 5
-    chart.lines[0].strokeColor = colors.HexColor("#cc0000")
-    chart.lines[0].strokeWidth = 1.5
-    chart.lines[1].strokeColor = colors.HexColor("#2f5d8a")
-    chart.lines[1].strokeWidth = 1.5
+    chart.data = series_data
+
+    all_values = [value for series in series_data for _, value in series]
+    chart.yValueAxis.valueMin = min(all_values) - 5
+    chart.yValueAxis.valueMax = max(all_values) + 5
+
+    all_days = [x for series in series_data for x, _ in series]
+    chart.xValueAxis.valueMin = min(all_days)
+    chart.xValueAxis.valueMax = max(all_days)
+    span_days = max(all_days) - min(all_days)
+    if span_days > 0:
+        chart.xValueAxis.valueStep = max(1, span_days // _CHART_MAX_LABELS + 1)
+    date_pattern = "%m/%d" if report_config.date_format == "us" else "%d/%m"
+    chart.xValueAxis.labelTextFormat = lambda value: (
+        (reference_date + timedelta(days=value)).astimezone().strftime(date_pattern)
+    )
+
+    for i, (_, (systolic_color, diastolic_color)) in enumerate(legend_entries):
+        chart.lines[i * 2].strokeColor = systolic_color
+        chart.lines[i * 2].strokeWidth = 1.5
+        chart.lines[i * 2 + 1].strokeColor = diastolic_color
+        chart.lines[i * 2 + 1].strokeWidth = 1.5
 
     drawing.add(chart)
+    caption = "Multiple people" if multi_person else "Systolic (red) / Diastolic (blue)"
     drawing.add(
         String(
             chart.x,
             chart.y + chart.height + 25,
-            f"Systolic (red) / Diastolic (blue), {unit_label}, over time",
+            f"{caption}, {unit_label}, over time",
             fontName="Helvetica-Bold",
             fontSize=10,
         )
     )
+    if multi_person:
+        _add_chart_legend(drawing, legend_entries, chart.x, legend_height - 5)
     return drawing
 
 
-def _summary_paragraphs(rows: list[ReportRow], report_config: ReportConfig, styles) -> list:
-    """Build min/max/average summary lines for systolic, diastolic, and pulse.
+def _summary_lines(rows: list[ReportRow], report_config: ReportConfig) -> list[str]:
+    """Build min/max/average text lines for systolic, diastolic, and category breakdown.
 
     Args:
-        rows: Reading rows to include, oldest first.
-        report_config: Supplies the pressure unit.
-        styles: A reportlab stylesheet, as returned by getSampleStyleSheet().
+        rows: Reading rows to include, oldest first. Should already be
+            restricted to one person -- averaging different people's
+            readings together would be medically meaningless.
+        report_config: Supplies the pressure unit and whether the category
+            breakdown is included.
 
     Returns:
-        Paragraph elements, empty if no row has pressure data.
+        Text lines, empty if no row has pressure data.
     """
     pairs = [_pressure_values(row, report_config.unit)[:2] for row in rows]
     systolic_values = [s for s, _ in pairs if s is not None]
@@ -640,7 +748,40 @@ def _summary_paragraphs(rows: list[ReportRow], report_config: ReportConfig, styl
             breakdown = ", ".join(f"{name}: {count}" for name, count in counts.items())
             lines.append(f"Category breakdown: {breakdown}")
 
-    return [Paragraph(line, styles["Normal"]) for line in lines]
+    return lines
+
+
+def _summary_paragraphs(rows: list[ReportRow], report_config: ReportConfig, styles) -> list:
+    """Build the summary section: one avg/min/max block per person if more than one.
+
+    Blending different people's systolic/diastolic averages together would
+    be medically meaningless (see the chart and rollup layout, which apply
+    the same per-person split), so this prints one labeled block per
+    distinct person -- see ``_who`` -- when the report spans more than one,
+    and the original unlabeled single block otherwise.
+
+    Args:
+        rows: Reading rows to include, oldest first.
+        report_config: Supplies the pressure unit and whether the category
+            breakdown is included.
+        styles: A reportlab stylesheet, as returned by getSampleStyleSheet().
+
+    Returns:
+        Paragraph elements, empty if no row has pressure data.
+    """
+    people = sorted({_who(row) for row in rows})
+    if len(people) <= 1:
+        return [Paragraph(line, styles["Normal"]) for line in _summary_lines(rows, report_config)]
+
+    elements = []
+    for person in people:
+        person_rows = [row for row in rows if _who(row) == person]
+        lines = _summary_lines(person_rows, report_config)
+        if not lines:
+            continue
+        elements.append(Paragraph(f"<b>{escape(person)}</b>", styles["Normal"]))
+        elements.extend(Paragraph(line, styles["Normal"]) for line in lines)
+    return elements
 
 
 def _estimate_rate_per_day(rows: list[ReportRow], value_of) -> float:

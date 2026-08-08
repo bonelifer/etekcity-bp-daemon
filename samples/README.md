@@ -7,18 +7,35 @@ fixture dataset (Alice trending down toward her configured goal over six
 weeks; Bob with one hypertensive-crisis-range reading, to show category
 shading).
 
+Every layout/toggle sample is rendered twice, into two folders:
+
+- **[combined/](combined/)** -- both Alice's and Bob's readings in one
+  report, the household view for a device shared by more than one person.
+  Since it spans more than one person, the chart gets one colored line pair
+  per person with a legend, the summary prints one avg/min/max block per
+  person, and the rollup layout adds a "Who" column instead of averaging
+  Alice's and Bob's numbers together.
+- **[single/](single/)** -- the same report, restricted to `--profile
+  Alice`, the report to print and bring to a doctor's appointment. No
+  legend, no "Who" column, one summary block -- just Alice's data on its
+  own.
+
+`single/` also has [full-with-goal-progress.pdf](single/full-with-goal-progress.pdf),
+which only makes sense for one profile at a time (goal progress reads a
+single person's configured goals), so it has no `combined/` counterpart.
+
 ## Table layout x unit x date format
 
 | File | Layout | Unit | Date format |
 |---|---|---|---|
-| [full-mmhg-world.pdf](full-mmhg-world.pdf) | full | mmhg | world |
-| [full-mmhg-us.pdf](full-mmhg-us.pdf) | full | mmhg | us |
-| [full-kpa-world.pdf](full-kpa-world.pdf) | full | kpa | world |
-| [full-kpa-us.pdf](full-kpa-us.pdf) | full | kpa | us |
-| [compact-mmhg-world.pdf](compact-mmhg-world.pdf) | compact | mmhg | world |
-| [compact-mmhg-us.pdf](compact-mmhg-us.pdf) | compact | mmhg | us |
-| [compact-kpa-world.pdf](compact-kpa-world.pdf) | compact | kpa | world |
-| [compact-kpa-us.pdf](compact-kpa-us.pdf) | compact | kpa | us |
+| [combined](combined/full-mmhg-world.pdf) / [single](single/full-mmhg-world.pdf) | full | mmhg | world |
+| [combined](combined/full-mmhg-us.pdf) / [single](single/full-mmhg-us.pdf) | full | mmhg | us |
+| [combined](combined/full-kpa-world.pdf) / [single](single/full-kpa-world.pdf) | full | kpa | world |
+| [combined](combined/full-kpa-us.pdf) / [single](single/full-kpa-us.pdf) | full | kpa | us |
+| [combined](combined/compact-mmhg-world.pdf) / [single](single/compact-mmhg-world.pdf) | compact | mmhg | world |
+| [combined](combined/compact-mmhg-us.pdf) / [single](single/compact-mmhg-us.pdf) | compact | mmhg | us |
+| [combined](combined/compact-kpa-world.pdf) / [single](single/compact-kpa-world.pdf) | compact | kpa | world |
+| [combined](combined/compact-kpa-us.pdf) / [single](single/compact-kpa-us.pdf) | compact | kpa | us |
 
 `full` is one row per reading. `compact` is the same per-reading detail
 packed into 2 side-by-side column groups, for a long history without
@@ -28,8 +45,8 @@ sprawling across as many pages.
 
 | File | Rollup period |
 |---|---|
-| [rollup-week-mmhg.pdf](rollup-week-mmhg.pdf) | week |
-| [rollup-month-mmhg.pdf](rollup-month-mmhg.pdf) | month |
+| [combined](combined/rollup-week-mmhg.pdf) / [single](single/rollup-week-mmhg.pdf) | week |
+| [combined](combined/rollup-month-mmhg.pdf) / [single](single/rollup-month-mmhg.pdf) | month |
 
 One row per week/month instead of per reading -- avg/min/max systolic and
 diastolic, average pulse, reading count, and the worst AHA category seen
@@ -41,15 +58,15 @@ layout.
 
 | File | What it shows |
 |---|---|
-| [full-minimal.pdf](full-minimal.pdf) | `include_address`/`include_profile`/`include_categories`/`include_summary` all `no` -- the bare-minimum table |
-| [chart-only.pdf](chart-only.pdf) | `include_table = no` -- trend chart alone, no table |
-| [table-only.pdf](table-only.pdf) | `include_chart = no` -- table alone, no chart |
+| [combined](combined/full-minimal.pdf) / [single](single/full-minimal.pdf) | `include_address`/`include_profile`/`include_categories`/`include_summary` all `no` -- the bare-minimum table |
+| [combined](combined/chart-only.pdf) / [single](single/chart-only.pdf) | `include_table = no` -- trend chart alone, no table |
+| [combined](combined/table-only.pdf) / [single](single/table-only.pdf) | `include_chart = no` -- table alone, no chart |
 
 ## Per-profile personalization
 
 | File | What it shows |
 |---|---|
-| [full-with-goal-progress.pdf](full-with-goal-progress.pdf) | `--profile Alice` with `include_goal_progress = yes` -- name/email/notes, restricted to just her readings, and the Goal Progress section |
+| [single/full-with-goal-progress.pdf](single/full-with-goal-progress.pdf) | `--profile Alice` with `include_goal_progress = yes` -- name/email/notes, restricted to just her readings, and the Goal Progress section |
 
 ## Regenerating
 

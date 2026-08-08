@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from etekcity_bp_daemon.config import DEFAULT_PATIENT_CONFIG, DEFAULT_REPORT_CONFIG
 from etekcity_bp_daemon.report import (
     _apply_profile_overrides,
+    _build_chart,
     _build_compact_table,
+    _build_rollup_buckets,
     _build_rollup_table,
     _build_table,
     _estimate_rate_per_day,
@@ -13,6 +15,7 @@ from etekcity_bp_daemon.report import (
     _resolve_range,
     _rollup_key,
     _rollup_label,
+    _summary_paragraphs,
     build_csv,
     build_pdf,
     fetch_rows,
@@ -378,3 +381,107 @@ def test_build_pdf_layout_permutations(tmp_path):
         build_pdf(rows, output, config)
         with open(output, "rb") as pdf_file:
             assert pdf_file.read(4) == b"%PDF"
+
+
+def _two_person_rows(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    _record(store, "2026-01-05T08:00:00+00:00", user=0, profile="Alice", systolic=145, diastolic=92)
+    _record(store, "2026-01-06T08:00:00+00:00", user=1, profile="Bob", systolic=118, diastolic=76)
+    store.close()
+    return fetch_rows(db_path, None, None, None)
+
+
+def test_rollup_buckets_split_same_period_by_person(tmp_path):
+    rows = _two_person_rows(tmp_path)
+    buckets = _build_rollup_buckets(rows, "week")
+    # Same ISO week, but two distinct people -- must not be one blended bucket.
+    assert len(buckets) == 2
+    keys = list(buckets)
+    assert keys[0][:2] == keys[1][:2]
+    assert {key[2] for key in keys} == {"Alice", "Bob"}
+    for bucket_rows in buckets.values():
+        assert len(bucket_rows) == 1
+
+
+def test_rollup_table_adds_who_column_when_multi_person(tmp_path):
+    rows = _two_person_rows(tmp_path)
+    table = _build_rollup_table(rows, DEFAULT_REPORT_CONFIG)
+    header = table._cellvalues[0]
+    assert "Who" in header
+    who_col = header.index("Who")
+    people = {row[who_col] for row in table._cellvalues[1:]}
+    assert people == {"Alice", "Bob"}
+    # Neither person's numbers should equal a blended average of both.
+    systolic_col = header.index("Systolic\navg (min-max) mmHg")
+    values = [row[systolic_col] for row in table._cellvalues[1:]]
+    assert "145 (145-145)" in values
+    assert "118 (118-118)" in values
+
+
+def test_rollup_table_omits_who_column_for_single_person(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    _record(store, "2026-01-05T08:00:00+00:00", profile="Alice")
+    store.close()
+    rows = fetch_rows(db_path, None, None, None)
+    table = _build_rollup_table(rows, DEFAULT_REPORT_CONFIG)
+    assert "Who" not in table._cellvalues[0]
+
+
+def test_summary_paragraphs_split_by_person(tmp_path):
+    rows = _two_person_rows(tmp_path)
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    styles = getSampleStyleSheet()
+    elements = _summary_paragraphs(rows, DEFAULT_REPORT_CONFIG, styles)
+    text = " ".join(el.text for el in elements)
+    assert "Alice" in text
+    assert "Bob" in text
+    assert "avg 145" in text
+    assert "avg 118" in text
+    # Never a blended combined average across both people.
+    assert "avg 132" not in text and "avg 131" not in text
+
+
+def test_summary_paragraphs_single_block_for_one_person(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    _record(store, "2026-01-05T08:00:00+00:00", profile="Alice", systolic=145, diastolic=92)
+    store.close()
+    rows = fetch_rows(db_path, None, None, None)
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    styles = getSampleStyleSheet()
+    elements = _summary_paragraphs(rows, DEFAULT_REPORT_CONFIG, styles)
+    text = " ".join(el.text for el in elements)
+    assert "<b>Alice</b>" not in text
+    assert "avg 145" in text
+
+
+def test_chart_draws_one_line_pair_per_person(tmp_path):
+    rows = _two_person_rows(tmp_path)
+    drawing = _build_chart(rows, DEFAULT_REPORT_CONFIG)
+    # One LinePlot with 4 series (Alice systolic/diastolic, Bob systolic/diastolic).
+    chart = drawing.contents[0]
+    assert len(chart.data) == 4
+
+
+def test_chart_single_person_has_two_series(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    _record(store, "2026-01-05T08:00:00+00:00", profile="Alice", systolic=145, diastolic=92)
+    _record(store, "2026-01-06T08:00:00+00:00", profile="Alice", systolic=140, diastolic=90)
+    store.close()
+    rows = fetch_rows(db_path, None, None, None)
+    drawing = _build_chart(rows, DEFAULT_REPORT_CONFIG)
+    chart = drawing.contents[0]
+    assert len(chart.data) == 2
+
+
+def test_build_pdf_renders_multi_person_report(tmp_path):
+    rows = _two_person_rows(tmp_path)
+    output = str(tmp_path / "report.pdf")
+    build_pdf(rows, output, DEFAULT_REPORT_CONFIG)
+    with open(output, "rb") as pdf_file:
+        assert pdf_file.read(4) == b"%PDF"
