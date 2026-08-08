@@ -1,9 +1,9 @@
-"""Lightweight local HTTP API: fetch the latest reading or generate a report on demand.
+"""Lightweight local HTTP API: latest readings, on-demand reports, and profile tagging.
 
-Reads from the same SQLite database as everything else in this package --
-it's a standalone read-only view onto that data, not part of the daemon's
-BLE connection lifecycle, so it works whether or not the daemon is
-currently running.
+Reads from (and, for /assign-profile, writes to) the same SQLite database
+as everything else in this package -- it's a standalone view onto that
+data, not part of the daemon's BLE connection lifecycle, so it works
+whether or not the daemon is currently running.
 """
 
 from __future__ import annotations
@@ -210,10 +210,12 @@ async def handle_report(request: web.Request) -> web.Response:
     """GET /report[?format=pdf|csv&period=...&from=...&to=...&address=...&profile=...].
 
     Generates a report on demand using the same config-driven settings as
-    ``etekcity-bp-report`` and returns it as a file download. Name/email/
-    unit/goal only ever come from ``profile``'s own ``[profile.<name>]``
-    section -- there's no shared fallback, since defaulting to someone
-    else's goal would be a correctness bug, not a convenience.
+    ``etekcity-bp-report`` and returns it as a file download. Report
+    personalization (name/email/notes, unit/date-format/page-size
+    overrides, goals) only ever comes from ``profile``'s own
+    ``[profile.<name>]`` section -- there's no shared fallback, since
+    defaulting to someone else's goal would be a correctness bug, not a
+    convenience.
     """
     unauthorized = _require_auth(request)
     if unauthorized is not None:
@@ -285,7 +287,7 @@ def build_app(
 
     Args:
         config_path: Path to the INI configuration file, used to load a
-            specific profile's name/email/unit/goal on demand.
+            specific profile's [profile.<name>] personalization on demand.
         db_path: Path to the SQLite database file.
         api_config: Supplies the auth token.
         report_config: Used for on-demand report generation.
@@ -313,8 +315,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="etekcity-bp-api",
         description=(
-            "Lightweight local HTTP API: fetch the latest reading or "
-            "generate a report on demand."
+            "Lightweight local HTTP API: latest readings, on-demand "
+            "reports, and profile tagging."
         ),
     )
     parser.add_argument(

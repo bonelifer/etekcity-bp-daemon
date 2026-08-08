@@ -144,7 +144,11 @@ class ReadingStore:
             recorded_at: ISO-8601 UTC timestamp of the reading.
             address: BLE address of the device that produced it.
             user: Device user slot (0 = User 1, 1 = User 2).
-            profile: Profile name mapped to this user slot, if configured.
+            profile: Profile name, if already known at insert time.
+                Normally None -- profiles are tagged after the fact via
+                ``set_reading_profile()`` once ntfy/dunstify gets an answer,
+                since the device's user slot alone can't identify who took
+                the reading.
             systolic_mmhg: Systolic pressure in mmHg, if reported.
             diastolic_mmhg: Diastolic pressure in mmHg, if reported.
             systolic_kpa: Systolic pressure in kPa, if reported.
