@@ -49,3 +49,24 @@ def test_check_config_reports_valid_profile_details(tmp_path, capsys):
     assert _check_config(config_path) == 0
     out = capsys.readouterr().out
     assert "details_valid=2/2" in out
+
+
+def test_check_config_warns_on_insecure_api_exposure(tmp_path, capsys):
+    contents = _BASE_CONFIG.format(
+        db_path=str(tmp_path / "readings.db")
+    ) + "\n[api]\nenabled = yes\nhost = 0.0.0.0\ntoken =\n"
+    config_path = _write(tmp_path, contents)
+    assert _check_config(config_path) == 0
+    out = capsys.readouterr().out
+    assert "warning" in out.lower()
+    assert "api.token" in out
+
+
+def test_check_config_no_warning_when_api_token_set(tmp_path, capsys):
+    contents = _BASE_CONFIG.format(
+        db_path=str(tmp_path / "readings.db")
+    ) + "\n[api]\nenabled = yes\nhost = 0.0.0.0\ntoken = secret\n"
+    config_path = _write(tmp_path, contents)
+    assert _check_config(config_path) == 0
+    out = capsys.readouterr().out
+    assert "anyone who can reach this address" not in out

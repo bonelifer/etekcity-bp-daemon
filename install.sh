@@ -38,19 +38,24 @@ cp "${REPO_DIR}/scripts/generate-scheduled-report.sh" "${INSTALL_DIR}/generate-s
 chmod +x "${INSTALL_DIR}/generate-scheduled-report.sh"
 ln -sf "${INSTALL_DIR}/generate-scheduled-report.sh" /usr/bin/etekcity-bp-generate-report
 
-echo "==> Seeding config"
-mkdir -p "${CONFIG_DIR}"
-if [[ -f "${CONFIG_DIR}/config.ini" ]]; then
-    echo "    ${CONFIG_DIR}/config.ini already exists, leaving it as-is."
-else
-    cp "${REPO_DIR}/config/etekcity-bp-daemon.ini.example" "${CONFIG_DIR}/config.ini"
-    echo "    Wrote ${CONFIG_DIR}/config.ini -- edit it before (or after) starting the service."
-fi
-
 echo "==> Creating service user"
 if ! id "${SERVICE_USER}" &>/dev/null; then
     useradd --system --no-create-home --group "${SERVICE_USER}"
 fi
+
+echo "==> Seeding config"
+mkdir -p "${CONFIG_DIR}"
+if [[ -f "${CONFIG_DIR}/config.ini" ]]; then
+    echo "    ${CONFIG_DIR}/config.ini already exists, leaving its contents as-is."
+else
+    cp "${REPO_DIR}/config/etekcity-bp-daemon.ini.example" "${CONFIG_DIR}/config.ini"
+    echo "    Wrote ${CONFIG_DIR}/config.ini -- edit it before (or after) starting the service."
+fi
+# The config can hold real secrets (ntfy/API tokens, apprise_urls with
+# embedded credentials), so it's only readable by the service account --
+# applied every run, not just on first write, in case it was ever loosened.
+chown "${SERVICE_USER}:${SERVICE_USER}" "${CONFIG_DIR}/config.ini"
+chmod 600 "${CONFIG_DIR}/config.ini"
 
 echo "==> Installing systemd units"
 cp "${REPO_DIR}/systemd/etekcity-bp-daemon.service" /etc/systemd/system/
@@ -64,6 +69,9 @@ systemctl enable --now etekcity-bp-daemon
 
 echo "==> Done. Edit ${CONFIG_DIR}/config.ini if you haven't, then watch discovery with:"
 echo "        journalctl -u etekcity-bp-daemon -f"
+echo "==> Since the config is now owned by ${SERVICE_USER} (mode 600), running the CLI"
+echo "    tools by hand needs sudo -u, e.g.:"
+echo "        sudo -u ${SERVICE_USER} etekcity-bp-report --config ${CONFIG_DIR}/config.ini"
 echo "==> Scheduled report generation, alert checking, and the HTTP API are installed"
 echo "    but not enabled (opt-in). To turn them on:"
 echo "        sudo systemctl enable --now etekcity-bp-report-generate.timer"

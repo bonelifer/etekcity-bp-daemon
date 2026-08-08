@@ -65,6 +65,16 @@ and enables the systemd service. It also installs (but does not enable) the
 It's safe to re-run: it skips steps that are already done. Edit the config
 and `sudo systemctl restart etekcity-bp-daemon` afterward.
 
+`config.ini` can hold real secrets -- ntfy/API tokens, `apprise_urls` with
+embedded credentials -- so `install.sh` sets it to mode `600`, owned by the
+`etekcity-bp-daemon` user, every time it runs (including on re-runs, in case
+it was ever loosened). Running the CLI tools by hand afterward needs
+`sudo -u etekcity-bp-daemon`, e.g.:
+
+```bash
+sudo -u etekcity-bp-daemon etekcity-bp-report --config /etc/etekcity-bp-daemon/config.ini
+```
+
 ### Manual install
 
 ```bash
@@ -207,6 +217,12 @@ local users/processes on the same host shouldn't see readings:
 ```bash
 curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/latest
 ```
+
+If `api.host` isn't a loopback address and `api.token` is blank, both
+`etekcity-bp-api` (at startup) and `--check-config` print a warning -- it's
+not blocked outright, since a reverse proxy handling auth in front is a
+legitimate setup, but forgetting to set a token before exposing the API on
+the LAN is a plausible mistake worth surfacing instead of allowing silently.
 
 ### Profiles
 
