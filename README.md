@@ -14,7 +14,7 @@ Raspberry Pi sitting near the monitor.
 affiliated with, officially maintained by, or in any way officially
 connected with Etekcity Corporation or Guangdong Transtek Medical
 Electronics Co., Ltd. Nothing here is medical advice; the AHA category
-labels and crisis-range alerting are informational only -- talk to a
+labels and crisis-range alerting are informational only. Talk to a
 doctor about your blood pressure readings.**
 
 ## Supported device
@@ -36,7 +36,7 @@ protocol may work.
   readings, or an irregular heartbeat
 - Optional read-only HTTP API and MQTT publishing
 - Optional "who was this?" profile tagging for a device shared by more than
-  two people, via ntfy or dunstify -- not limited to the device's own
+  two people, via ntfy or dunstify, not limited to the device's own
   two-slot user distinction
 - Optional per-profile report personalization (name/email/notes, preferred
   unit/date format/page size, and doctor-set blood-pressure/pulse goals
@@ -65,8 +65,8 @@ and enables the systemd service. It also installs (but does not enable) the
 It's safe to re-run: it skips steps that are already done. Edit the config
 and `sudo systemctl restart etekcity-bp-daemon` afterward.
 
-`config.ini` can hold real secrets -- ntfy/API tokens, `apprise_urls` with
-embedded credentials -- so `install.sh` sets it to mode `600`, owned by the
+`config.ini` can hold real secrets (ntfy/API tokens, `apprise_urls` with
+embedded credentials), so `install.sh` sets it to mode `600`, owned by the
 `etekcity-bp-daemon` user, every time it runs (including on re-runs, in case
 it was ever loosened). Running the CLI tools by hand afterward needs
 `sudo -u etekcity-bp-daemon`, e.g.:
@@ -169,7 +169,7 @@ and how many URLs it parsed, without actually sending anything.
 
 If a reading is tagged with a profile (see [Profiles](#profiles)), that
 profile's `[profile.<name>]` section can override the destination and
-thresholds just for its own alerts -- see
+thresholds just for its own alerts; see
 [Per-profile alert routing](#per-profile-alert-routing).
 
 ### HTTP API
@@ -219,16 +219,17 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/latest
 ```
 
 If `api.host` isn't a loopback address and `api.token` is blank, both
-`etekcity-bp-api` (at startup) and `--check-config` print a warning -- it's
+`etekcity-bp-api` (at startup) and `--check-config` print a warning. It's
 not blocked outright, since a reverse proxy handling auth in front is a
 legitimate setup, but forgetting to set a token before exposing the API on
-the LAN is a plausible mistake worth surfacing instead of allowing silently.
+the LAN is a plausible mistake worth surfacing rather than letting it pass
+silently.
 
 ### Profiles
 
 For a device shared by more than one person: `[profiles]` asks "who was
 this?" after each reading and tags it. The device's own user slot (0 or 1)
-can't be used for this -- it only ever reports one of two values no matter
+can't be used for this: it only ever reports one of two values no matter
 how many people actually share the device, so it can't tell a third or
 fourth person apart from whoever normally uses that slot. This mirrors
 [`etekcity-scale-daemon`](https://github.com/bonelifer/etekcity-scale-daemon)'s
@@ -256,7 +257,7 @@ Two delivery paths, chosen automatically based on whether `[api]` is enabled:
   directly, no network round-trip. It needs the `dunst` notification daemon
   and a real desktop/D-Bus session, which makes it a better fit for running
   the daemon on your own desktop or laptop than an unattended headless Pi
-  (the usual deployment for this daemon) -- ntfy is the practical choice
+  (the usual deployment for this daemon), so ntfy is the practical choice
   there.
 
 ```bash
@@ -295,7 +296,7 @@ goal_diastolic_mmhg = 80
 goal_pulse_bpm = 70
 ```
 
-- `name`/`email`/`notes` print below the report title -- handy when handing
+- `name`/`email`/`notes` print below the report title, handy when handing
   a printed report to a doctor (`notes` for clinical context like current
   medication).
 - `unit`/`date_format`/`page_size` each independently override the matching
@@ -329,10 +330,10 @@ alert_on_irregular_heartbeat = yes
 - `stale_after_days`/`alert_on_irregular_heartbeat` override the matching
   `[alerting]` value for this profile only; leave blank to inherit it.
 - The hypertensive-crisis thresholds (`crisis_systolic_mmhg`/
-  `crisis_diastolic_mmhg`) are never overridden per profile -- they're a
+  `crisis_diastolic_mmhg`) are never overridden per profile: they're a
   fixed medical definition, not a personal preference.
 
-None of this is required -- a profile with no `[profile.<name>]` section at
+None of this is required. A profile with no `[profile.<name>]` section at
 all still tags and reports/alerts normally, just without the
 personalization. `--check-config` validates every configured profile's
 section and reports how many parsed cleanly (`details_valid=N/M`).
@@ -349,13 +350,13 @@ docker compose up -d
 Or use the prebuilt image instead of `docker compose build`'s local build:
 `ghcr.io/bonelifer/etekcity-bp-daemon:latest`. CI builds this image on every
 push to `main`, runs `--check-config` and a report generation inside it, and
-pushes it to GHCR -- so the image itself is exercised, but only its CLI
+pushes it to GHCR, so the image itself is exercised, but only its CLI
 tooling, not a live BLE connection (see below).
 
 BLE access from inside a container needs the host's D-Bus system bus and
 Bluetooth adapter, which `docker-compose.yml` reaches via `network_mode:
-host` and a `/var/run/dbus` bind mount. **This part is unverified** -- BLE
-from containers is finicky across host setups; the bare-metal `systemd`
+host` and a `/var/run/dbus` bind mount. **This part is unverified**: BLE
+from containers is finicky across host setups, and the bare-metal `systemd`
 install is the well-tested path. If Docker doesn't see the adapter, try
 running the container with `--privileged` or check that BlueZ's D-Bus
 service is reachable at the mounted socket.
@@ -411,22 +412,22 @@ etekcity-bp-report --config /etc/etekcity-bp-daemon/config.ini --profile Alice
 
 PDF reports include a systolic/diastolic trend chart, a reading table shaded
 by AHA blood-pressure category, and (if `report.include_summary = yes`) an
-average/min/max summary with a category breakdown -- handy to print and
+average/min/max summary with a category breakdown, handy to print and
 bring to a doctor's appointment. `--profile <name>` (requires `--config`)
-also personalizes the report from that profile's `[profile.<name>]` section
--- see [Per-profile report personalization](#per-profile-report-personalization).
+also personalizes the report from that profile's `[profile.<name>]` section;
+see [Per-profile report personalization](#per-profile-report-personalization).
 
 `report.include_chart`/`include_table` independently toggle the chart and
 table off if you don't want them, and `report.table_layout` picks the
 table's shape: `full` (one row per reading, the default), `compact` (same
 per-reading detail, packed into 2 side-by-side column groups), or `rollup`
-(one row per week/month -- avg/min/max, reading count, and the worst AHA
+(one row per week/month: avg/min/max, reading count, and the worst AHA
 category seen that period). For a long history, `rollup` paired with the
 chart is generally more useful than paging through a year of individual
 readings.
 
 See [samples/](samples/) for a rendered PDF of every layout/unit/date-format
-combination, plus the toggle and goal-progress demos above --
+combination, plus the toggle and goal-progress demos above:
 [samples/combined/](samples/combined/) for the whole household sharing one
 device, [samples/single/](samples/single/) for a single person's report to
 bring to a doctor's appointment.
@@ -434,15 +435,15 @@ bring to a doctor's appointment.
 **Reports spanning more than one person are split per person, not blended.**
 If a report's rows include more than one distinct profile (or untagged
 "User 1"/"User 2" without profiles), averaging everyone's systolic/diastolic
-together into one number would be medically meaningless -- so the chart gets
+together into one number would be medically meaningless, so the chart gets
 one colored line pair per person (with a legend), the summary prints one
 avg/min/max block per person, and the `rollup` layout adds a "Who" column
 and buckets by `(period, person)` instead of just `(period)`. The full/
 compact per-reading tables already label each row via the "Who" column
 (`report.include_profile = yes`), so they're unaffected. This is the right
 default for a household report shared by everyone using the device, but if
-you want a single person's data instead -- e.g. to bring to a doctor's
-appointment -- pass `--profile <name>` (or `?profile=` via the API) rather
+you want a single person's data instead (e.g. to bring to a doctor's
+appointment), pass `--profile <name>` (or `?profile=` via the API) rather
 than filtering the combined report after the fact.
 
 ## Pruning old data
@@ -465,14 +466,14 @@ topic_prefix = etekcity_bp_daemon
 ```
 
 Each reading publishes as JSON to `<topic_prefix>/<device address>/state`. A
-broker outage is logged and non-fatal -- it never blocks local recording to
+broker outage is logged and non-fatal; it never blocks local recording to
 SQLite.
 
 ## Troubleshooting
 
 - **Device never discovered**: make sure it's powered on (press `MEM`) while
   the daemon is scanning, and that no other app (e.g. VeSync, nRF Connect)
-  is already connected to it -- the device only accepts one connection at a
+  is already connected to it: the device only accepts one connection at a
   time.
 - **`No Bluetooth scanner available`**: check `bluetoothctl` shows an
   adapter, and that the `etekcity-bp-daemon` system user is in the
