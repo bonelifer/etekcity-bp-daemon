@@ -57,18 +57,24 @@ include_goal_progress = no
 # Publish each reading to an MQTT broker as JSON. Defaults to no. A broker
 # outage is logged and non-fatal -- it never blocks local recording.
 enabled = no
+
 # Required if enabled = yes.
 host =
 port = 1883
+
 # Optional broker credentials; leave blank if not required.
 username =
 password =
+
 # yes or no -- wraps the connection in TLS
 use_tls = no
+
 # Messages publish to <topic_prefix>/<device address>/state
 topic_prefix = etekcity_bp_daemon
+
 # 0, 1, or 2
 qos = 0
+
 # yes or no -- whether the broker retains the last message for new subscribers
 retain = yes
 
@@ -79,18 +85,23 @@ retain = yes
 # etekcity-bp-alert-check.timer) -- nothing here runs automatically on its
 # own. Defaults to no.
 enabled = no
+
 # Comma-separated Apprise service URLs, e.g. tgram://bot_token/chat_id.
 # Required if enabled = yes.
 apprise_urls =
+
 # Alert if a user slot hasn't reported in this many days. 0 disables this check.
 stale_after_days = 0
+
 # Alert if the latest reading's systolic/diastolic is at or above these
 # thresholds (the AHA's hypertensive-crisis range starts above 180/120).
 # 0 disables the respective check.
 crisis_systolic_mmhg = 180
 crisis_diastolic_mmhg = 120
+
 # Alert when a reading's irregular-heartbeat flag is set. Defaults to no.
 alert_on_irregular_heartbeat = no
+
 # Where to persist per-user-slot alert state (throttling repeat alerts).
 state_path = /var/lib/etekcity-bp-daemon/alert-state.json
 
@@ -99,10 +110,12 @@ state_path = /var/lib/etekcity-bp-daemon/alert-state.json
 # /report. Defaults to no. There's no TLS built in -- keep host bound to
 # loopback (the default) unless it sits behind a reverse proxy.
 enabled = no
+
 # Bind address. Change to 0.0.0.0 (or a specific interface) only if you
 # understand the exposure -- set token below if you do.
 host = 127.0.0.1
 port = 8080
+
 # Optional bearer token: if set, all endpoints except /health require an
 # "Authorization: Bearer <token>" header. Leave blank for no auth (fine
 # for loopback-only use).
@@ -126,20 +139,26 @@ token =
 #     without one, so it's mainly useful running the daemon on your own
 #     desktop/laptop rather than an unattended Pi.
 enabled = no
+
 # Comma-separated list of names to choose between. No limit -- unlike the
 # device's own user slots, any number of people can share the tagging.
 names =
+
 # Required only when [api] is enabled: an ntfy topic URL, e.g.
 # https://ntfy.sh/your-topic or a self-hosted https://ntfy.example.com/your-topic.
 ntfy_url =
+
 # Optional access token, if your ntfy server/topic requires auth.
 ntfy_token =
+
 # Where this API is reachable, for the ntfy action buttons to call back
 # into. Only used when [api] is enabled.
 api_base_url = http://127.0.0.1:8080
+
 # Seconds to wait for a dunstify response before giving up. Only used
 # when [api] is disabled.
 dunstify_timeout_seconds = 30
+
 # Reject /assign-profile requests tagging a reading older than this many
 # seconds, unless &confirm=1 is also passed. Guards against a delayed
 # ntfy notification -- tapped long after it was sent, once connectivity
