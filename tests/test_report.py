@@ -118,7 +118,7 @@ def test_goal_progress_lines_no_goal_set(tmp_path):
     patient = PatientConfig(
         name="Alice", email="", unit="", goal_systolic_mmhg=None, goal_diastolic_mmhg=None
     )
-    lines = _goal_progress_lines(rows, patient)
+    lines = _goal_progress_lines(rows, DEFAULT_REPORT_CONFIG, patient)
     assert "No goal_systolic_mmhg/goal_diastolic_mmhg set for this profile." in lines
 
 
@@ -133,11 +133,29 @@ def test_goal_progress_lines_over_goal_and_trending_toward_it(tmp_path):
     patient = PatientConfig(
         name="Alice", email="", unit="", goal_systolic_mmhg=130, goal_diastolic_mmhg=80
     )
-    lines = _goal_progress_lines(rows, patient)
+    lines = _goal_progress_lines(rows, DEFAULT_REPORT_CONFIG, patient)
     joined = " ".join(lines)
     assert "Systolic: current 140, goal 130 mmHg (10 mmHg over goal)" in joined
     assert "Trending toward goal" in joined
     assert "Diastolic: current 90, goal 80 mmHg (10 mmHg over goal)" in joined
+
+
+def test_goal_progress_lines_respects_kpa_display_unit(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    _record(store, "2026-01-01T00:00:00+00:00", systolic=150, diastolic=95)
+    store.close()
+
+    rows = fetch_rows(db_path, None, None, None)
+    patient = PatientConfig(
+        name="Alice", email="", unit="", goal_systolic_mmhg=130, goal_diastolic_mmhg=80
+    )
+    kpa_report_config = replace(DEFAULT_REPORT_CONFIG, unit="kpa")
+    lines = _goal_progress_lines(rows, kpa_report_config, patient)
+    joined = " ".join(lines)
+    assert "mmHg" not in joined
+    # 150 mmHg -> 20 kPa, 130 mmHg goal -> 17 kPa (both rounded via :.0f)
+    assert "Systolic: current 20, goal 17 kPa" in joined
 
 
 def test_build_pdf_with_patient_config_and_goal_progress(tmp_path):

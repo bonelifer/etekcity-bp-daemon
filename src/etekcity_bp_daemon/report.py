@@ -459,15 +459,29 @@ def _estimate_rate_per_day(rows: list[ReportRow], value_of) -> float:
     return numerator / denominator if denominator > 0 else 0.0
 
 
+# mmHg -> kPa conversion factor for goal display. Matches
+# etekcity_bp_ble.const.MMHG_TO_KPA; goals are always entered in mmHg (the
+# clinical standard doctors use) and converted here for display only.
+_MMHG_TO_KPA = 0.13332
+
+
+def _convert_mmhg(value_mmhg: float, unit: str) -> float:
+    """Convert a mmHg value to the report's display unit."""
+    return value_mmhg * _MMHG_TO_KPA if unit == "kpa" else value_mmhg
+
+
 def _goal_metric_lines(
-    label: str, rows: list[ReportRow], goal_mmhg: int, value_of
+    label: str, rows: list[ReportRow], goal_mmhg: int, unit: str, value_of
 ) -> list[str]:
     """Build current/goal/remaining/trend lines for one metric (systolic or diastolic).
 
     Args:
         label: "Systolic" or "Diastolic", for the rendered text.
         rows: Reading rows to include, oldest first.
-        goal_mmhg: The profile's goal for this metric, in mmHg.
+        goal_mmhg: The profile's goal for this metric, always in mmHg
+            regardless of the report's display unit.
+        unit: The report's display unit ("mmhg" or "kpa") -- current and
+            goal are converted into this for the rendered text.
         value_of: Extracts this metric's mmHg value from a ReportRow.
 
     Returns:
@@ -477,20 +491,27 @@ def _goal_metric_lines(
     if not valued:
         return []
 
-    current = value_of(valued[-1])
-    remaining = current - goal_mmhg
+    current_mmhg = value_of(valued[-1])
+    remaining_mmhg = current_mmhg - goal_mmhg
+    unit_label = "kPa" if unit == "kpa" else "mmHg"
 
-    if remaining > 0:
-        status = f"{remaining:.0f} mmHg over goal"
+    if remaining_mmhg > 0:
+        status = f"{_convert_mmhg(remaining_mmhg, unit):.0f} {unit_label} over goal"
     else:
         status = "at or under goal"
 
-    lines = [f"{label}: current {current:.0f}, goal {goal_mmhg} mmHg ({status})"]
+    current_display = _convert_mmhg(current_mmhg, unit)
+    goal_display = _convert_mmhg(goal_mmhg, unit)
+    lines = [
+        f"{label}: current {current_display:.0f}, goal {goal_display:.0f} "
+        f"{unit_label} ({status})"
+    ]
 
     if len(valued) >= 2:
         # The goal is a ceiling (e.g. "keep it under 130/80"), so a falling
         # rate is favorable and a rising rate is unfavorable regardless of
         # whether the current reading happens to be over or under it yet.
+        # Computed in mmHg -- a positive unit conversion can't flip its sign.
         rate = _estimate_rate_per_day(valued, value_of)
         if rate < 0:
             lines.append("  Trending toward goal (decreasing) at the current rate of change.")
@@ -500,11 +521,14 @@ def _goal_metric_lines(
     return lines
 
 
-def _goal_progress_lines(rows: list[ReportRow], patient_config: PatientConfig) -> list[str]:
+def _goal_progress_lines(
+    rows: list[ReportRow], report_config: ReportConfig, patient_config: PatientConfig
+) -> list[str]:
     """Build the text lines for the "Goal Progress" report section.
 
     Args:
         rows: Reading rows to include, oldest first.
+        report_config: Supplies the display unit to render current/goal in.
         patient_config: Supplies the profile's goal_systolic_mmhg /
             goal_diastolic_mmhg, either or both of which may be unset.
 
@@ -519,13 +543,21 @@ def _goal_progress_lines(rows: list[ReportRow], patient_config: PatientConfig) -
     if patient_config.goal_systolic_mmhg is not None:
         lines.extend(
             _goal_metric_lines(
-                "Systolic", rows, patient_config.goal_systolic_mmhg, lambda r: r.systolic_mmhg
+                "Systolic",
+                rows,
+                patient_config.goal_systolic_mmhg,
+                report_config.unit,
+                lambda r: r.systolic_mmhg,
             )
         )
     if patient_config.goal_diastolic_mmhg is not None:
         lines.extend(
             _goal_metric_lines(
-                "Diastolic", rows, patient_config.goal_diastolic_mmhg, lambda r: r.diastolic_mmhg
+                "Diastolic",
+                rows,
+                patient_config.goal_diastolic_mmhg,
+                report_config.unit,
+                lambda r: r.diastolic_mmhg,
             )
         )
 
@@ -533,19 +565,20 @@ def _goal_progress_lines(rows: list[ReportRow], patient_config: PatientConfig) -
 
 
 def _build_goal_progress_elements(
-    rows: list[ReportRow], patient_config: PatientConfig, styles
+    rows: list[ReportRow], report_config: ReportConfig, patient_config: PatientConfig, styles
 ) -> list:
     """Build a "Goal Progress" heading and summary for this profile's BP goal.
 
     Args:
         rows: Reading rows to include, oldest first.
+        report_config: Supplies the display unit to render current/goal in.
         patient_config: Supplies the profile's goal, if set.
         styles: The document's reportlab stylesheet.
 
     Returns:
         Flowables to append: a heading plus one line per metric goal.
     """
-    lines = _goal_progress_lines(rows, patient_config)
+    lines = _goal_progress_lines(rows, report_config, patient_config)
     return [
         Paragraph("Goal Progress", styles["Heading2"]),
         Spacer(1, 0.05 * inch),
@@ -591,7 +624,7 @@ def build_pdf(
     elements.append(Spacer(1, 0.2 * inch))
 
     if report_config.include_goal_progress:
-        elements.extend(_build_goal_progress_elements(rows, patient_config, styles))
+        elements.extend(_build_goal_progress_elements(rows, report_config, patient_config, styles))
 
     elements.append(_build_chart(rows, report_config))
     elements.append(Spacer(1, 0.2 * inch))
