@@ -17,6 +17,7 @@ import aiomqtt
 from etekcity_bp_ble import BloodPressureMonitor, BPData, discover
 
 from ._version import __version__
+from .api import is_insecurely_exposed
 from .config import (
     DEFAULT_API_CONFIG,
     DEFAULT_MQTT_CONFIG,
@@ -562,6 +563,12 @@ def _check_config(config_path: str) -> int:
             f"{', '.join(orphaned_profiles)} (still filterable via --profile, "
             "but there's no way to re-tag them via ntfy/dunstify anymore -- "
             "add them back to profiles.names if this wasn't intentional)"
+        )
+    if is_insecurely_exposed(api_config):
+        print(
+            f"  warning: api.host is {api_config.host!r} (not loopback) but "
+            "api.token is unset -- anyone who can reach this address can read "
+            "readings and generate reports. Set api.token, or bind to 127.0.0.1."
         )
     return 0
 

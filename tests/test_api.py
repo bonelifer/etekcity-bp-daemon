@@ -3,7 +3,7 @@ from dataclasses import replace
 
 from aiohttp.test_utils import TestClient, TestServer
 
-from etekcity_bp_daemon.api import build_app
+from etekcity_bp_daemon.api import build_app, is_insecurely_exposed
 from etekcity_bp_daemon.config import (
     DEFAULT_API_CONFIG,
     DEFAULT_PROFILES_CONFIG,
@@ -185,3 +185,23 @@ def test_report_endpoint_rejects_unknown_format(tmp_path):
             assert resp.status == 400
 
     _run(scenario())
+
+
+def test_is_insecurely_exposed_loopback_without_token_is_fine():
+    config = replace(DEFAULT_API_CONFIG, host="127.0.0.1", token="")
+    assert is_insecurely_exposed(config) is False
+
+
+def test_is_insecurely_exposed_non_loopback_without_token():
+    config = replace(DEFAULT_API_CONFIG, host="0.0.0.0", token="")
+    assert is_insecurely_exposed(config) is True
+
+
+def test_is_insecurely_exposed_non_loopback_with_token_is_fine():
+    config = replace(DEFAULT_API_CONFIG, host="0.0.0.0", token="secret")
+    assert is_insecurely_exposed(config) is False
+
+
+def test_is_insecurely_exposed_localhost_alias_is_loopback():
+    config = replace(DEFAULT_API_CONFIG, host="localhost", token="")
+    assert is_insecurely_exposed(config) is False

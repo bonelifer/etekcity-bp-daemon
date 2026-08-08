@@ -33,6 +33,19 @@ from .storage import ensure_schema, get_reading_recorded_at, set_reading_profile
 _VALID_FORMATS = ("pdf", "csv")
 _VALID_PERIODS = ("7d", "30d", "90d", "1y", "all")
 
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def is_insecurely_exposed(api_config: ApiConfig) -> bool:
+    """Return whether the API is bound to a non-loopback address with no auth token.
+
+    Not a hard failure -- there are legitimate reasons to do this (a reverse
+    proxy in front that handles auth) -- but it's the shape of a mistake
+    (forgetting to set a token before exposing the API on the LAN) worth
+    surfacing rather than silently allowing.
+    """
+    return api_config.host not in _LOOPBACK_HOSTS and not api_config.token
+
 
 def _latest_readings(
     db_path: str, address: str | None, profile: str | None = None
@@ -337,6 +350,14 @@ def main(argv: list[str] | None = None) -> int:
     if not api_config.enabled:
         print("API is disabled (api.enabled = no).")
         return 0
+
+    if is_insecurely_exposed(api_config):
+        print(
+            f"WARNING: api.host is {api_config.host!r} (not loopback) but api.token "
+            "is unset -- anyone who can reach this address can read readings and "
+            "generate reports. Set api.token, or bind to 127.0.0.1 and put a "
+            "reverse proxy with its own auth in front if you need remote access."
+        )
 
     ensure_schema(db_path)
     app = build_app(args.config, db_path, api_config, report_config, profiles_config)
