@@ -8,6 +8,7 @@ from etekcity_bp_daemon.config import (
     load_api_config,
     load_config,
     load_mqtt_config,
+    load_profile_details,
     load_profiles_config,
     load_report_config,
     persist_discovered_address,
@@ -152,6 +153,104 @@ def test_load_profiles_config_invalid_assign_window(tmp_path):
     )
     with pytest.raises(ConfigError):
         load_profiles_config(config_path)
+
+
+def test_load_profile_details_missing_section_defaults_to_profile_name(tmp_path):
+    config_path = _write(tmp_path, _BASE_CONFIG)
+    patient = load_profile_details(config_path, "Alice")
+    assert patient.name == "Alice"
+    assert patient.email == ""
+    assert patient.notes == ""
+    assert patient.unit == ""
+    assert patient.date_format == ""
+    assert patient.page_size == ""
+    assert patient.goal_systolic_mmhg is None
+    assert patient.goal_diastolic_mmhg is None
+    assert patient.goal_pulse_bpm is None
+    assert patient.apprise_urls == []
+    assert patient.stale_after_days is None
+    assert patient.alert_on_irregular_heartbeat is None
+
+
+def test_load_profile_details_full_section(tmp_path):
+    config_path = _write(
+        tmp_path,
+        _BASE_CONFIG
+        + "\n[profile.Alice]\n"
+        "name = Alice Smith\n"
+        "email = alice@example.com\n"
+        "notes = On lisinopril 10mg\n"
+        "unit = kpa\n"
+        "date_format = us\n"
+        "page_size = a4\n"
+        "goal_systolic_mmhg = 130\n"
+        "goal_diastolic_mmhg = 80\n"
+        "goal_pulse_bpm = 70\n"
+        "apprise_urls = json://alice-phone\n"
+        "stale_after_days = 1\n"
+        "alert_on_irregular_heartbeat = yes\n",
+    )
+    patient = load_profile_details(config_path, "Alice")
+    assert patient.name == "Alice Smith"
+    assert patient.email == "alice@example.com"
+    assert patient.notes == "On lisinopril 10mg"
+    assert patient.unit == "kpa"
+    assert patient.date_format == "us"
+    assert patient.page_size == "a4"
+    assert patient.goal_systolic_mmhg == 130
+    assert patient.goal_diastolic_mmhg == 80
+    assert patient.goal_pulse_bpm == 70
+    assert patient.apprise_urls == ["json://alice-phone"]
+    assert patient.stale_after_days == 1
+    assert patient.alert_on_irregular_heartbeat is True
+
+
+def test_load_profile_details_invalid_unit(tmp_path):
+    config_path = _write(
+        tmp_path, _BASE_CONFIG + "\n[profile.Alice]\nunit = pounds\n"
+    )
+    with pytest.raises(ConfigError):
+        load_profile_details(config_path, "Alice")
+
+
+def test_load_profile_details_invalid_goal(tmp_path):
+    config_path = _write(
+        tmp_path, _BASE_CONFIG + "\n[profile.Alice]\ngoal_systolic_mmhg = -5\n"
+    )
+    with pytest.raises(ConfigError):
+        load_profile_details(config_path, "Alice")
+
+
+def test_load_profile_details_invalid_date_format(tmp_path):
+    config_path = _write(
+        tmp_path, _BASE_CONFIG + "\n[profile.Alice]\ndate_format = european\n"
+    )
+    with pytest.raises(ConfigError):
+        load_profile_details(config_path, "Alice")
+
+
+def test_load_profile_details_invalid_stale_after_days(tmp_path):
+    config_path = _write(
+        tmp_path, _BASE_CONFIG + "\n[profile.Alice]\nstale_after_days = -1\n"
+    )
+    with pytest.raises(ConfigError):
+        load_profile_details(config_path, "Alice")
+
+
+def test_load_profile_details_stale_after_days_zero_is_valid(tmp_path):
+    config_path = _write(
+        tmp_path, _BASE_CONFIG + "\n[profile.Alice]\nstale_after_days = 0\n"
+    )
+    patient = load_profile_details(config_path, "Alice")
+    assert patient.stale_after_days == 0
+
+
+def test_load_profile_details_invalid_alert_on_irregular_heartbeat(tmp_path):
+    config_path = _write(
+        tmp_path, _BASE_CONFIG + "\n[profile.Alice]\nalert_on_irregular_heartbeat = maybe\n"
+    )
+    with pytest.raises(ConfigError):
+        load_profile_details(config_path, "Alice")
 
 
 def test_persist_discovered_address(tmp_path):

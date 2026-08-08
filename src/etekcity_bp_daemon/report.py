@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import csv
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+from xml.sax.saxutils import escape
 
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
 from reportlab.graphics.shapes import Drawing, String
@@ -19,10 +20,13 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from ._version import __version__
 from .categories import CRISIS, ELEVATED, NORMAL, STAGE_1, STAGE_2, classify
 from .config import (
+    DEFAULT_PATIENT_CONFIG,
     DEFAULT_REPORT_CONFIG,
     ConfigError,
+    PatientConfig,
     ReportConfig,
     load_config,
+    load_profile_details,
     load_report_config,
 )
 from .storage import ensure_schema
@@ -198,6 +202,33 @@ def _pressure_values(row: ReportRow, unit: str) -> tuple[float | None, float | N
 def _who(row: ReportRow) -> str:
     """Return the profile name if set, else "User N"."""
     return row.profile or f"User {row.user + 1}"
+
+
+def _apply_profile_overrides(
+    report_config: ReportConfig, patient_config: PatientConfig
+) -> ReportConfig:
+    """Apply a profile's unit/date_format/page_size overrides onto report_config.
+
+    Each override is independent and only applied if the profile actually
+    set it, so e.g. one household member can override just the unit while
+    still using the shared date_format and page_size.
+
+    Args:
+        report_config: The base (shared) report configuration.
+        patient_config: Supplies the profile's overrides, if any.
+
+    Returns:
+        A copy of ``report_config`` with the profile's overrides applied,
+        or ``report_config`` unchanged if the profile set none of them.
+    """
+    overrides = {}
+    if patient_config.unit:
+        overrides["unit"] = patient_config.unit
+    if patient_config.date_format:
+        overrides["date_format"] = patient_config.date_format
+    if patient_config.page_size:
+        overrides["page_size"] = patient_config.page_size
+    return replace(report_config, **overrides) if overrides else report_config
 
 
 def build_csv(rows: list[ReportRow], output_path: str, report_config: ReportConfig) -> None:
@@ -421,15 +452,212 @@ def _summary_paragraphs(rows: list[ReportRow], report_config: ReportConfig, styl
     return [Paragraph(line, styles["Normal"]) for line in lines]
 
 
-def build_pdf(rows: list[ReportRow], output_path: str, report_config: ReportConfig) -> None:
+def _estimate_rate_per_day(rows: list[ReportRow], value_of) -> float:
+    """Estimate the rate of change per day via least-squares linear regression.
+
+    Fits a line through every row's (days since the first row, value(row))
+    rather than just the first and last point, so one outlier can't single-
+    handedly swing the whole estimate the way a bare 2-point slope would.
+    With exactly two points this reduces to that same 2-point slope, since
+    a line through two points *is* their least-squares fit.
+
+    Args:
+        rows: Rows to fit, at least one entry, already filtered to those
+            where ``value_of`` returns a non-None value.
+        value_of: Extracts the numeric value to trend from a ReportRow.
+
+    Returns:
+        Units per day, positive for rising, negative for falling. 0.0 if
+        fewer than two distinct timestamps are present (a rate can't be
+        estimated from a single point in time).
+    """
+    if len(rows) < 2:
+        return 0.0
+
+    t0 = rows[0].recorded_at
+    xs = [(row.recorded_at - t0).total_seconds() / 86400 for row in rows]
+    ys = [value_of(row) for row in rows]
+
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    denominator = sum((x - mean_x) ** 2 for x in xs)
+
+    return numerator / denominator if denominator > 0 else 0.0
+
+
+# mmHg -> kPa conversion factor for goal display. Matches
+# etekcity_bp_ble.const.MMHG_TO_KPA; goals are always entered in mmHg (the
+# clinical standard doctors use) and converted here for display only.
+_MMHG_TO_KPA = 0.13332
+
+
+def _convert_mmhg(value_mmhg: float, unit: str) -> float:
+    """Convert a mmHg value to the report's display unit."""
+    return value_mmhg * _MMHG_TO_KPA if unit == "kpa" else value_mmhg
+
+
+def _goal_metric_lines(
+    label: str, rows: list[ReportRow], goal_native: float, unit_label: str, convert, value_of
+) -> list[str]:
+    """Build current/goal/remaining/trend lines for one metric.
+
+    Args:
+        label: "Systolic", "Diastolic", or "Pulse", for the rendered text.
+        rows: Reading rows to include, oldest first.
+        goal_native: The profile's goal for this metric, in its native unit
+            (mmHg for pressure, bpm for pulse) regardless of the report's
+            display unit.
+        unit_label: The unit label to render (e.g. "mmHg", "kPa", "bpm").
+        convert: Converts a native-unit value to the display unit (identity
+            for pulse, which has no unit to convert).
+        value_of: Extracts this metric's native-unit value from a ReportRow.
+
+    Returns:
+        Text lines, empty if no row has a value for this metric.
+    """
+    valued = [row for row in rows if value_of(row) is not None]
+    if not valued:
+        return []
+
+    current_native = value_of(valued[-1])
+    remaining_native = current_native - goal_native
+
+    if remaining_native > 0:
+        status = f"{convert(remaining_native):.0f} {unit_label} over goal"
+    else:
+        status = "at or under goal"
+
+    current_display = convert(current_native)
+    goal_display = convert(goal_native)
+    lines = [
+        f"{label}: current {current_display:.0f}, goal {goal_display:.0f} "
+        f"{unit_label} ({status})"
+    ]
+
+    if len(valued) >= 2:
+        # The goal is a ceiling (e.g. "keep it under 130/80"), so a falling
+        # rate is favorable and a rising rate is unfavorable regardless of
+        # whether the current reading happens to be over or under it yet.
+        # Computed in the native unit -- a positive conversion factor can't
+        # flip its sign.
+        rate = _estimate_rate_per_day(valued, value_of)
+        if rate < 0:
+            lines.append("  Trending toward goal (decreasing) at the current rate of change.")
+        elif rate > 0:
+            lines.append("  Trending away from goal (increasing) at the current rate of change.")
+
+    return lines
+
+
+def _goal_progress_lines(
+    rows: list[ReportRow], report_config: ReportConfig, patient_config: PatientConfig
+) -> list[str]:
+    """Build the text lines for the "Goal Progress" report section.
+
+    Args:
+        rows: Reading rows to include, oldest first.
+        report_config: Supplies the display unit to render current/goal in.
+        patient_config: Supplies the profile's goal_systolic_mmhg /
+            goal_diastolic_mmhg / goal_pulse_bpm, any of which may be unset.
+
+    Returns:
+        Text lines. A note if no goal is set or no readings have data for
+        any goal metric, otherwise one summary per configured goal.
+    """
+    if (
+        patient_config.goal_systolic_mmhg is None
+        and patient_config.goal_diastolic_mmhg is None
+        and patient_config.goal_pulse_bpm is None
+    ):
+        return [
+            "No goal_systolic_mmhg/goal_diastolic_mmhg/goal_pulse_bpm set for this profile."
+        ]
+
+    unit = report_config.unit
+    pressure_unit_label = "kPa" if unit == "kpa" else "mmHg"
+
+    def convert_pressure(value_mmhg: float) -> float:
+        return _convert_mmhg(value_mmhg, unit)
+
+    lines: list[str] = []
+    if patient_config.goal_systolic_mmhg is not None:
+        lines.extend(
+            _goal_metric_lines(
+                "Systolic",
+                rows,
+                patient_config.goal_systolic_mmhg,
+                pressure_unit_label,
+                convert_pressure,
+                lambda r: r.systolic_mmhg,
+            )
+        )
+    if patient_config.goal_diastolic_mmhg is not None:
+        lines.extend(
+            _goal_metric_lines(
+                "Diastolic",
+                rows,
+                patient_config.goal_diastolic_mmhg,
+                pressure_unit_label,
+                convert_pressure,
+                lambda r: r.diastolic_mmhg,
+            )
+        )
+    if patient_config.goal_pulse_bpm is not None:
+        lines.extend(
+            _goal_metric_lines(
+                "Pulse",
+                rows,
+                patient_config.goal_pulse_bpm,
+                "bpm",
+                lambda value: value,
+                lambda r: r.pulse_bpm,
+            )
+        )
+
+    return lines or ["No readings with data for the configured goal(s) in this report's range."]
+
+
+def _build_goal_progress_elements(
+    rows: list[ReportRow], report_config: ReportConfig, patient_config: PatientConfig, styles
+) -> list:
+    """Build a "Goal Progress" heading and summary for this profile's BP goal.
+
+    Args:
+        rows: Reading rows to include, oldest first.
+        report_config: Supplies the display unit to render current/goal in.
+        patient_config: Supplies the profile's goal, if set.
+        styles: The document's reportlab stylesheet.
+
+    Returns:
+        Flowables to append: a heading plus one line per metric goal.
+    """
+    lines = _goal_progress_lines(rows, report_config, patient_config)
+    return [
+        Paragraph("Goal Progress", styles["Heading2"]),
+        Spacer(1, 0.05 * inch),
+        *(Paragraph(line, styles["Normal"]) for line in lines),
+        Spacer(1, 0.15 * inch),
+    ]
+
+
+def build_pdf(
+    rows: list[ReportRow],
+    output_path: str,
+    report_config: ReportConfig = DEFAULT_REPORT_CONFIG,
+    patient_config: PatientConfig = DEFAULT_PATIENT_CONFIG,
+) -> None:
     """Render reading rows as a chart, summary, and table in a PDF file.
 
     Args:
         rows: Reading rows to include, oldest first.
         output_path: Filesystem path to write the PDF to.
         report_config: Controls which columns are shown, the pressure unit,
-            the date/time format, the page size, and whether a summary is
-            printed.
+            the date/time format, the page size, whether a summary is
+            printed, and whether goal progress is included.
+        patient_config: Optional patient name/email to print below the
+            title (fields left blank are omitted), and the goal(s) used by
+            ``report_config.include_goal_progress``.
     """
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(output_path, pagesize=_PAGE_SIZES[report_config.page_size])
@@ -441,9 +669,18 @@ def build_pdf(rows: list[ReportRow], output_path: str, report_config: ReportConf
             styles["Normal"],
         ),
     ]
+    if patient_config.name:
+        elements.append(Paragraph(f"Patient: {escape(patient_config.name)}", styles["Normal"]))
+    if patient_config.email:
+        elements.append(Paragraph(f"Email: {escape(patient_config.email)}", styles["Normal"]))
+    if patient_config.notes:
+        elements.append(Paragraph(f"Notes: {escape(patient_config.notes)}", styles["Normal"]))
     if report_config.include_summary:
         elements.extend(_summary_paragraphs(rows, report_config, styles))
     elements.append(Spacer(1, 0.2 * inch))
+
+    if report_config.include_goal_progress:
+        elements.extend(_build_goal_progress_elements(rows, report_config, patient_config, styles))
 
     elements.append(_build_chart(rows, report_config))
     elements.append(Spacer(1, 0.2 * inch))
@@ -491,7 +728,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "-a", "--address", help="Restrict the report to one device's BLE address"
     )
     parser.add_argument(
-        "-P", "--profile", help="Restrict to readings tagged with this profile name"
+        "-P",
+        "--profile",
+        help=(
+            "Restrict to readings tagged with this profile name (requires "
+            "--config); also supplies the name/email/unit/goal shown on a "
+            "PDF report from that profile's [profile.<name>] section"
+        ),
     )
     return parser.parse_args(argv)
 
@@ -507,6 +750,10 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = _parse_args(argv)
 
+    if args.profile and not args.config:
+        print("Error: --profile requires --config (profile details live in the config file)")
+        return 1
+
     db_path = args.db
     report_config = DEFAULT_REPORT_CONFIG
     if args.config:
@@ -519,6 +766,14 @@ def main(argv: list[str] | None = None) -> int:
 
     ensure_schema(db_path)
 
+    patient_config = DEFAULT_PATIENT_CONFIG
+    if args.profile:
+        try:
+            patient_config = load_profile_details(args.config, args.profile)
+        except ConfigError as exc:
+            print(f"Error: {exc}")
+            return 1
+
     start, end = _resolve_range(args.period, args.from_date, args.to_date)
     output = args.output or f"bp-report.{args.format}"
 
@@ -527,10 +782,15 @@ def main(argv: list[str] | None = None) -> int:
         print("No readings found for the given range/filters.")
         return 1
 
+    # A profile's own unit/date_format/page_size (if set) override the
+    # shared report config for its reports, so e.g. one household member
+    # can see mmHg while another sees kPa.
+    effective_report_config = _apply_profile_overrides(report_config, patient_config)
+
     if args.format == "csv":
-        build_csv(rows, output, report_config)
+        build_csv(rows, output, effective_report_config)
     else:
-        build_pdf(rows, output, report_config)
+        build_pdf(rows, output, effective_report_config, patient_config)
     print(f"Wrote {len(rows)} reading(s) to {output}")
     return 0
 

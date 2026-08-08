@@ -37,6 +37,11 @@ protocol may work.
 - Optional "who was this?" profile tagging for a device shared by more than
   two people, via ntfy or dunstify -- not limited to the device's own
   two-slot user distinction
+- Optional per-profile report personalization (name/email/notes, preferred
+  unit/date format/page size, and doctor-set blood-pressure/pulse goals
+  with trend tracking)
+- Optional per-profile alert routing and threshold overrides, so different
+  people's alerts can go to different places
 
 ## Installation
 
@@ -151,6 +156,11 @@ every check. State is tracked per user slot in `alerting.state_path`
 reset throttling. `--check-config` reports whether `[alerting]` is enabled
 and how many URLs it parsed, without actually sending anything.
 
+If a reading is tagged with a profile (see [Profiles](#profiles)), that
+profile's `[profile.<name>]` section can override the destination and
+thresholds just for its own alerts -- see
+[Per-profile alert routing](#per-profile-alert-routing).
+
 ### HTTP API
 
 Also optional and not enabled by default. `etekcity-bp-api` runs a small
@@ -251,6 +261,65 @@ name was removed or renamed but readings tagged with the old name still
 exist, it prints a warning (not an error; the exit code stays `0`) so that
 history doesn't just silently stop being explainable.
 
+#### Per-profile report personalization
+
+Give a profile its own `[profile.<name>]` section (name/email, notes, report
+preferences, and/or a blood-pressure goal), and `etekcity-bp-report
+--profile <name>` / the API's `?profile=` will use it:
+
+```ini
+[profile.Alice]
+name = Alice Smith
+email = alice@example.com
+notes = On lisinopril 10mg
+unit = mmhg
+goal_systolic_mmhg = 130
+goal_diastolic_mmhg = 80
+goal_pulse_bpm = 70
+```
+
+- `name`/`email`/`notes` print below the report title -- handy when handing
+  a printed report to a doctor (`notes` for clinical context like current
+  medication).
+- `unit`/`date_format`/`page_size` each independently override the matching
+  `[report]` setting for this profile's reports only, so one household
+  member can see mmHg while another sees kPa.
+- `goal_systolic_mmhg`/`goal_diastolic_mmhg`/`goal_pulse_bpm` (any subset,
+  independently) enable `report.include_goal_progress = yes`: the current
+  average against each goal, and whether it's trending toward or away from
+  it based on a linear fit across the report's date range. Since a BP goal
+  is a ceiling ("keep it under X/Y"), a falling trend is favorable
+  regardless of whether the current average happens to be over or under it
+  yet.
+
+#### Per-profile alert routing
+
+The same `[profile.<name>]` section can also override `[alerting]` for
+alerts triggered by that profile's readings (untagged readings always use
+the global values):
+
+```ini
+[profile.Alice]
+apprise_urls = tgram://bot_token/alice_chat_id
+stale_after_days = 1
+alert_on_irregular_heartbeat = yes
+```
+
+- `apprise_urls` **replaces** the global `[alerting] apprise_urls` for this
+  profile's alerts rather than adding to it, so Alice's alerts go to her
+  phone and Bob's go to his instead of everyone seeing a shared feed.
+  Leave blank to just use the global list.
+- `stale_after_days`/`alert_on_irregular_heartbeat` override the matching
+  `[alerting]` value for this profile only; leave blank to inherit it.
+- The hypertensive-crisis thresholds (`crisis_systolic_mmhg`/
+  `crisis_diastolic_mmhg`) are never overridden per profile -- they're a
+  fixed medical definition, not a personal preference.
+
+None of this is required -- a profile with no `[profile.<name>]` section at
+all still tags and reports/alerts normally, just without the
+personalization. `--check-config` validates every configured profile's
+section and reports how many parsed cleanly (`details_valid=N/M`).
+
 ### Docker
 
 ```bash
@@ -320,7 +389,9 @@ etekcity-bp-report --config /etc/etekcity-bp-daemon/config.ini --profile Alice
 PDF reports include a systolic/diastolic trend chart, a reading table shaded
 by AHA blood-pressure category, and (if `report.include_summary = yes`) an
 average/min/max summary with a category breakdown -- handy to print and
-bring to a doctor's appointment.
+bring to a doctor's appointment. `--profile <name>` (requires `--config`)
+also personalizes the report from that profile's `[profile.<name>]` section
+-- see [Per-profile report personalization](#per-profile-report-personalization).
 
 ## Pruning old data
 
