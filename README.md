@@ -363,15 +363,17 @@ service is reachable at the mounted socket.
 
 ## Manual usage
 
-### Cron-driven polling instead of a long-running service
+### On-demand capture instead of a long-running service
 
 ```bash
 etekcity-bp-daemon --config /etc/etekcity-bp-daemon/config.ini --once --once-timeout 60
 ```
 
 Connects, waits up to `--once-timeout` seconds for a single reading, records
-it, and exits. Exit code is `1` if no reading arrived in time. Useful for a
-cron job instead of a persistent `systemd` service.
+it, and exits. Exit code is `1` if no reading arrived in time. For when you'd
+rather not run the daemon continuously: start it by hand right before (or
+while) taking a reading, instead of taking the reading and finding nothing
+was listening.
 
 ## Database schema
 

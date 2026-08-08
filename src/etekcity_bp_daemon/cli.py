@@ -338,7 +338,8 @@ async def run_daemon(
         config: Loaded daemon configuration.
         once: If True, exit after recording a single reading (or after
             ``once_timeout`` seconds without one) instead of running until a
-            stop signal -- for cron-driven polling instead of a long-running
+            stop signal -- for an on-demand capture run by hand right
+            before (or while) taking a reading, instead of a long-running
             service.
         once_timeout: Seconds to wait for one reading before giving up. Only
             used when ``once`` is True.
@@ -606,7 +607,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Record one reading and exit, instead of running until stopped "
-            "(for cron-driven polling instead of a long-running service)"
+            "(run by hand right before taking a reading, instead of a "
+            "long-running service)"
         ),
     )
     parser.add_argument(
