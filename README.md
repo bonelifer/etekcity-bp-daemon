@@ -436,10 +436,9 @@ one colored line pair per person (with a legend), the summary prints one
 avg/min/max block per person, and the `rollup` layout adds a "Who" column
 and buckets by `(period, person)` instead of just `(period)`. The full/
 compact per-reading tables already label each row via the "Who" column
-(`report.include_profile = yes`), so they're unaffected. The PDF also
-prints a note pointing at `--profile <name>` (or `?profile=` via the API)
-whenever more than one person is present, since a single-person report is
-usually what you actually want.
+(`report.include_profile = yes`), so they're unaffected. If you only want
+one person's data, pass `--profile <name>` (or `?profile=` via the API)
+rather than filtering the combined report after the fact.
 
 ## Pruning old data
 

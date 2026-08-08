@@ -1003,18 +1003,6 @@ def build_pdf(
             styles["Normal"],
         ),
     ]
-    people = sorted({_who(row) for row in rows})
-    if len(people) > 1:
-        elements.append(
-            Paragraph(
-                f"This report includes readings from {len(people)} people "
-                f"({', '.join(escape(person) for person in people)}). The chart, "
-                "summary, and rollup table below are all split per person -- pass "
-                "--profile &lt;name&gt; (or ?profile= via the API) to see just one "
-                "person's report instead.",
-                styles["Italic"],
-            )
-        )
     if patient_config.name:
         elements.append(Paragraph(f"Patient: {escape(patient_config.name)}", styles["Normal"]))
     if patient_config.email:

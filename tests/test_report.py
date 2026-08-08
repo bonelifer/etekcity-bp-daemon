@@ -479,20 +479,8 @@ def test_chart_single_person_has_two_series(tmp_path):
     assert len(chart.data) == 2
 
 
-def test_build_pdf_includes_multi_person_guidance_note(tmp_path):
+def test_build_pdf_renders_multi_person_report(tmp_path):
     rows = _two_person_rows(tmp_path)
-    output = str(tmp_path / "report.pdf")
-    build_pdf(rows, output, DEFAULT_REPORT_CONFIG)
-    with open(output, "rb") as pdf_file:
-        assert pdf_file.read(4) == b"%PDF"
-
-
-def test_build_pdf_no_guidance_note_for_single_person(tmp_path):
-    db_path = str(tmp_path / "readings.db")
-    store = ReadingStore(db_path)
-    _record(store, "2026-01-05T08:00:00+00:00", profile="Alice")
-    store.close()
-    rows = fetch_rows(db_path, None, None, None)
     output = str(tmp_path / "report.pdf")
     build_pdf(rows, output, DEFAULT_REPORT_CONFIG)
     with open(output, "rb") as pdf_file:
