@@ -32,6 +32,10 @@ class ReportConfig:
     include_summary: bool
     include_categories: bool
     include_goal_progress: bool
+    include_chart: bool  # PDF only
+    include_table: bool  # PDF only; CSV always exports the full row set
+    table_layout: str  # "full", "compact", or "rollup" -- PDF only
+    rollup_period: str  # "week" or "month" -- only used when table_layout = rollup
     unit: str  # "mmhg" or "kpa"
     date_format: str  # "us" or "world"
     page_size: str  # "letter" or "a4"
@@ -43,6 +47,10 @@ DEFAULT_REPORT_CONFIG = ReportConfig(
     include_summary=True,
     include_categories=True,
     include_goal_progress=False,
+    include_chart=True,
+    include_table=True,
+    table_layout="full",
+    rollup_period="week",
     unit="mmhg",
     date_format="world",
     page_size="letter",
@@ -51,6 +59,8 @@ DEFAULT_REPORT_CONFIG = ReportConfig(
 _UNITS = ("mmhg", "kpa")
 _DATE_FORMATS = ("us", "world")
 _PAGE_SIZES = ("letter", "a4")
+_TABLE_LAYOUTS = ("full", "compact", "rollup")
+_ROLLUP_PERIODS = ("week", "month")
 
 
 @dataclass
@@ -323,6 +333,20 @@ def load_report_config(config_path: str) -> ReportConfig:
     if page_size not in _PAGE_SIZES:
         raise ConfigError(f"report.page_size must be one of {_PAGE_SIZES}, got {page_size!r}")
 
+    table_layout = report.get("table_layout", DEFAULT_REPORT_CONFIG.table_layout).strip().lower()
+    if table_layout not in _TABLE_LAYOUTS:
+        raise ConfigError(
+            f"report.table_layout must be one of {_TABLE_LAYOUTS}, got {table_layout!r}"
+        )
+
+    rollup_period = report.get(
+        "rollup_period", DEFAULT_REPORT_CONFIG.rollup_period
+    ).strip().lower()
+    if rollup_period not in _ROLLUP_PERIODS:
+        raise ConfigError(
+            f"report.rollup_period must be one of {_ROLLUP_PERIODS}, got {rollup_period!r}"
+        )
+
     return ReportConfig(
         include_address=_parse_bool(
             report.get("include_address", "yes"), "report.include_address"
@@ -339,6 +363,10 @@ def load_report_config(config_path: str) -> ReportConfig:
         include_goal_progress=_parse_bool(
             report.get("include_goal_progress", "no"), "report.include_goal_progress"
         ),
+        include_chart=_parse_bool(report.get("include_chart", "yes"), "report.include_chart"),
+        include_table=_parse_bool(report.get("include_table", "yes"), "report.include_table"),
+        table_layout=table_layout,
+        rollup_period=rollup_period,
         unit=unit,
         date_format=date_format,
         page_size=page_size,

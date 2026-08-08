@@ -59,12 +59,48 @@ def test_load_report_config_defaults(tmp_path):
     report = load_report_config(config_path)
     assert report.unit == "mmhg"
     assert report.include_categories is True
+    assert report.include_chart is True
+    assert report.include_table is True
+    assert report.table_layout == "full"
+    assert report.rollup_period == "week"
 
 
 def test_load_report_config_invalid_unit(tmp_path):
     config_path = _write(tmp_path, _BASE_CONFIG + "\n[report]\nunit = pounds\n")
     with pytest.raises(ConfigError):
         load_report_config(config_path)
+
+
+def test_load_report_config_table_layout(tmp_path):
+    config_path = _write(
+        tmp_path,
+        _BASE_CONFIG + "\n[report]\ntable_layout = rollup\nrollup_period = month\n",
+    )
+    report = load_report_config(config_path)
+    assert report.table_layout == "rollup"
+    assert report.rollup_period == "month"
+
+
+def test_load_report_config_invalid_table_layout(tmp_path):
+    config_path = _write(tmp_path, _BASE_CONFIG + "\n[report]\ntable_layout = fancy\n")
+    with pytest.raises(ConfigError):
+        load_report_config(config_path)
+
+
+def test_load_report_config_invalid_rollup_period(tmp_path):
+    config_path = _write(tmp_path, _BASE_CONFIG + "\n[report]\nrollup_period = year\n")
+    with pytest.raises(ConfigError):
+        load_report_config(config_path)
+
+
+def test_load_report_config_include_chart_and_table_toggles(tmp_path):
+    config_path = _write(
+        tmp_path,
+        _BASE_CONFIG + "\n[report]\ninclude_chart = no\ninclude_table = no\n",
+    )
+    report = load_report_config(config_path)
+    assert report.include_chart is False
+    assert report.include_table is False
 
 
 def test_load_mqtt_config_requires_host_when_enabled(tmp_path):
