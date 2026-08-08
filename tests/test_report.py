@@ -6,6 +6,7 @@ from etekcity_bp_daemon.report import (
     _apply_profile_overrides,
     _build_compact_table,
     _build_rollup_table,
+    _build_table,
     _estimate_rate_per_day,
     _goal_progress_lines,
     _range_str,
@@ -90,6 +91,43 @@ def test_build_csv_writes_header_and_rows(tmp_path):
     content = open(output).read()
     assert "Category" in content
     assert "Hypertensive Crisis" in content
+
+
+def test_include_profile_defaults_to_hidden(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    _record(store, "2026-01-01T00:00:00+00:00", profile="Alice")
+    store.close()
+    rows = fetch_rows(db_path, None, None, None)
+
+    csv_output = str(tmp_path / "report.csv")
+    build_csv(rows, csv_output, DEFAULT_REPORT_CONFIG)
+    assert "Who" not in open(csv_output).read()
+    assert "Alice" not in open(csv_output).read()
+
+    table = _build_table(rows, DEFAULT_REPORT_CONFIG)
+    header = table._cellvalues[0]
+    assert "Who" not in header
+    assert "Alice" not in table._cellvalues[1]
+
+
+def test_include_profile_yes_shows_who_column(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    _record(store, "2026-01-01T00:00:00+00:00", profile="Alice")
+    store.close()
+    rows = fetch_rows(db_path, None, None, None)
+    report_config = replace(DEFAULT_REPORT_CONFIG, include_profile=True)
+
+    csv_output = str(tmp_path / "report.csv")
+    build_csv(rows, csv_output, report_config)
+    content = open(csv_output).read()
+    assert "Who" in content
+    assert "Alice" in content
+
+    table = _build_table(rows, report_config)
+    assert "Who" in table._cellvalues[0]
+    assert "Alice" in table._cellvalues[1]
 
 
 def test_estimate_rate_per_day_falling(tmp_path):

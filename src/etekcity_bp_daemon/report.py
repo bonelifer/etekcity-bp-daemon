@@ -259,7 +259,8 @@ def build_csv(rows: list[ReportRow], output_path: str, report_config: ReportConf
     header = ["Date/Time (local)"]
     if report_config.include_address:
         header.append("Address")
-    header.append("Who")
+    if report_config.include_profile:
+        header.append("Who")
     header.extend([f"Systolic ({unit_label})", f"Diastolic ({unit_label})", "Pulse (bpm)"])
     if report_config.include_categories:
         header.append("Category")
@@ -273,7 +274,8 @@ def build_csv(rows: list[ReportRow], output_path: str, report_config: ReportConf
             values: list[object] = [_format_datetime(row.recorded_at, report_config.date_format)]
             if report_config.include_address:
                 values.append(row.address)
-            values.append(_who(row))
+            if report_config.include_profile:
+                values.append(_who(row))
             values.extend(
                 [
                     systolic if systolic is not None else "",
@@ -321,7 +323,8 @@ def _build_table(rows: list[ReportRow], report_config: ReportConfig) -> Table:
     header = ["Date/Time (local)"]
     if report_config.include_address:
         header.append("Address")
-    header.append("Who")
+    if report_config.include_profile:
+        header.append("Who")
     header.extend([f"Systolic\n({unit_label})", f"Diastolic\n({unit_label})", "Pulse\n(bpm)"])
     if report_config.include_categories:
         header.append("Category")
@@ -337,7 +340,8 @@ def _build_table(rows: list[ReportRow], report_config: ReportConfig) -> Table:
         values: list[object] = [_format_datetime(row.recorded_at, report_config.date_format)]
         if report_config.include_address:
             values.append(row.address)
-        values.append(_who(row))
+        if report_config.include_profile:
+            values.append(_who(row))
         values.extend(
             [
                 f"{systolic:.0f}" if systolic is not None else "-",
