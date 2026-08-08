@@ -66,43 +66,48 @@ _BASE_REPORT = {
     "page_size": "letter",
 }
 
-# Each sample: (output filename, [report] overrides, extra CLI args).
-_SAMPLES: list[tuple[str, dict[str, str], list[str]]] = [
+# Main grid + toggle demos: (output filename, [report] overrides). Each of
+# these is rendered twice -- once against the combined two-person fixture
+# (samples/combined/), once restricted to --profile Alice (samples/single/)
+# -- so every layout/toggle combination shows both the multi-person split
+# behavior and the plain single-person case side by side.
+_GRID_SAMPLES: list[tuple[str, dict[str, str]]] = [
     # Main grid: table_layout x unit x date_format, for the two per-reading
     # table layouts.
-    ("full-mmhg-world.pdf", {"table_layout": "full", "unit": "mmhg", "date_format": "world"}, []),
-    ("full-mmhg-us.pdf", {"table_layout": "full", "unit": "mmhg", "date_format": "us"}, []),
-    ("full-kpa-world.pdf", {"table_layout": "full", "unit": "kpa", "date_format": "world"}, []),
-    ("full-kpa-us.pdf", {"table_layout": "full", "unit": "kpa", "date_format": "us"}, []),
+    ("full-mmhg-world.pdf", {"table_layout": "full", "unit": "mmhg", "date_format": "world"}),
+    ("full-mmhg-us.pdf", {"table_layout": "full", "unit": "mmhg", "date_format": "us"}),
+    ("full-kpa-world.pdf", {"table_layout": "full", "unit": "kpa", "date_format": "world"}),
+    ("full-kpa-us.pdf", {"table_layout": "full", "unit": "kpa", "date_format": "us"}),
     (
         "compact-mmhg-world.pdf",
         {"table_layout": "compact", "unit": "mmhg", "date_format": "world"},
-        [],
     ),
     (
         "compact-mmhg-us.pdf",
         {"table_layout": "compact", "unit": "mmhg", "date_format": "us"},
-        [],
     ),
     (
         "compact-kpa-world.pdf",
         {"table_layout": "compact", "unit": "kpa", "date_format": "world"},
-        [],
     ),
-    ("compact-kpa-us.pdf", {"table_layout": "compact", "unit": "kpa", "date_format": "us"}, []),
+    ("compact-kpa-us.pdf", {"table_layout": "compact", "unit": "kpa", "date_format": "us"}),
     # Rollup layout: period matters more than unit/date-format here.
-    ("rollup-week-mmhg.pdf", {"table_layout": "rollup", "rollup_period": "week"}, []),
-    ("rollup-month-mmhg.pdf", {"table_layout": "rollup", "rollup_period": "month"}, []),
+    ("rollup-week-mmhg.pdf", {"table_layout": "rollup", "rollup_period": "week"}),
+    ("rollup-month-mmhg.pdf", {"table_layout": "rollup", "rollup_period": "month"}),
     # Toggle demos.
     (
         "full-minimal.pdf",
         {"include_address": "no", "include_profile": "no", "include_categories": "no",
          "include_summary": "no"},
-        [],
     ),
-    ("chart-only.pdf", {"include_table": "no"}, []),
-    ("table-only.pdf", {"include_chart": "no"}, []),
-    # Personalization: Alice's own report, with her goal progress section.
+    ("chart-only.pdf", {"include_table": "no"}),
+    ("table-only.pdf", {"include_chart": "no"}),
+]
+
+# Personalization only makes sense restricted to one profile (goal progress
+# reads a single PatientConfig's goals, which are unset for the default/
+# unfiltered report), so this only ever renders into samples/single/.
+_SINGLE_ONLY_SAMPLES: list[tuple[str, dict[str, str], list[str]]] = [
     (
         "full-with-goal-progress.pdf",
         {"include_goal_progress": "yes"},
@@ -153,27 +158,37 @@ def _write_config(path: Path, db_path: Path, report_overrides: dict[str, str]) -
 def main() -> int:
     repo_dir = Path(__file__).resolve().parent.parent
     samples_dir = repo_dir / "samples"
-    samples_dir.mkdir(exist_ok=True)
+    combined_dir = samples_dir / "combined"
+    single_dir = samples_dir / "single"
+    combined_dir.mkdir(parents=True, exist_ok=True)
+    single_dir.mkdir(parents=True, exist_ok=True)
+
+    jobs: list[tuple[Path, str, dict[str, str], list[str]]] = []
+    for filename, report_overrides in _GRID_SAMPLES:
+        jobs.append((combined_dir, filename, report_overrides, []))
+        jobs.append((single_dir, filename, report_overrides, ["--profile", "Alice"]))
+    for filename, report_overrides, extra_args in _SINGLE_ONLY_SAMPLES:
+        jobs.append((single_dir, filename, report_overrides, extra_args))
 
     with tempfile.TemporaryDirectory() as workdir:
         workdir_path = Path(workdir)
         db_path = workdir_path / "readings.db"
         _build_fixture_db(db_path)
 
-        for filename, report_overrides, extra_args in _SAMPLES:
-            config_path = workdir_path / f"{filename}.ini"
+        for i, (output_dir, filename, report_overrides, extra_args) in enumerate(jobs):
+            config_path = workdir_path / f"{i}-{filename}.ini"
             _write_config(config_path, db_path, report_overrides)
-            output_path = samples_dir / filename
+            output_path = output_dir / filename
             argv = ["--config", str(config_path), "--output", str(output_path), *extra_args]
-            print(f"==> {filename}")
+            print(f"==> {output_path.relative_to(samples_dir)}")
             with redirect_stdout(io.StringIO()) as captured:
                 exit_code = report_main(argv)
             if exit_code != 0:
                 print(captured.getvalue(), file=sys.stderr)
-                print(f"Failed to generate {filename}", file=sys.stderr)
+                print(f"Failed to generate {output_path}", file=sys.stderr)
                 return 1
 
-    print(f"Wrote {len(_SAMPLES)} sample(s) to {samples_dir}")
+    print(f"Wrote {len(jobs)} sample(s) to {samples_dir}")
     return 0
 
 
