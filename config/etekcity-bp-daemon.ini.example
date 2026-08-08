@@ -45,6 +45,31 @@ date_format = world
 # PDF page size: letter or a4
 page_size = letter
 
+# Include the systolic/diastolic trend chart. PDF only.
+include_chart = yes
+
+# Include a reading table at all (see table_layout below for which shape).
+# PDF only; CSV export always includes the full row set regardless of
+# either of these two settings.
+include_table = yes
+
+# Shape of the table, when include_table = yes:
+#   full    - one row per reading (default). Sprawls across many pages for
+#             a long history (e.g. a year of daily readings = 365+ rows).
+#   compact - Date/Systolic/Diastolic/Pulse only, packed into 2 side-by-side
+#             column groups so a page isn't mostly empty. Still one row per
+#             reading, just denser.
+#   rollup  - one row per week/month instead of per reading (avg/min/max
+#             systolic and diastolic, average pulse, reading count, and the
+#             worst AHA category seen that period). A year of daily
+#             readings becomes ~52 rows instead of 365 -- the practical
+#             answer for a long history, paired with the chart above.
+table_layout = full
+
+# Rollup bucket size, only used when table_layout = rollup: week (ISO
+# calendar week, Monday-Sunday) or month (calendar month).
+rollup_period = week
+
 # Print a "Goal Progress" section (current average vs. goal, and whether
 # trending toward or away from it) for the selected --profile <name> /
 # ?profile=<name>. Unlike the section itself erroring, a profile with no

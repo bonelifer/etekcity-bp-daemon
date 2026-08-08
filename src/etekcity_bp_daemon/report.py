@@ -6,7 +6,7 @@ import argparse
 import csv
 import sqlite3
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from xml.sax.saxutils import escape
 
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
@@ -52,6 +52,16 @@ _CATEGORY_COLORS = {
     STAGE_1: colors.HexColor("#fce5cd"),
     STAGE_2: colors.HexColor("#f4cccc"),
     CRISIS: colors.HexColor("#cc0000"),
+}
+
+# AHA category -> severity rank, higher is worse. Used to pick the "worst"
+# category within a rollup period.
+_CATEGORY_SEVERITY = {
+    NORMAL: 0,
+    ELEVATED: 1,
+    STAGE_1: 2,
+    STAGE_2: 3,
+    CRISIS: 4,
 }
 
 
@@ -284,6 +294,17 @@ def build_csv(rows: list[ReportRow], output_path: str, report_config: ReportConf
             writer.writerow(values)
 
 
+def _header_style_commands() -> list[tuple]:
+    """Return the header/grid/font style commands shared by every table layout."""
+    return [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2f5d8a")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+    ]
+
+
 def _build_table(rows: list[ReportRow], report_config: ReportConfig) -> Table:
     """Build the PDF reading table, with rows shaded by AHA category.
 
@@ -332,19 +353,185 @@ def _build_table(rows: list[ReportRow], report_config: ReportConfig) -> Table:
         data.append(values)
 
     numeric_cols = [len(header) - 4, len(header) - 3, len(header) - 2]
-    style_commands = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2f5d8a")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-    ]
+    style_commands = _header_style_commands()
     style_commands.extend(("ALIGN", (idx, 1), (idx, -1), "RIGHT") for idx in numeric_cols)
     for row_index, category in enumerate(categories, start=1):
         color = _CATEGORY_COLORS.get(category, colors.white)
         style_commands.append(("BACKGROUND", (0, row_index), (-1, row_index), color))
         if category == CRISIS:
             style_commands.append(("TEXTCOLOR", (0, row_index), (-1, row_index), colors.white))
+
+    table = Table(data, repeatRows=1)
+    table.setStyle(TableStyle(style_commands))
+    return table
+
+
+_COMPACT_LAYOUT_COLUMN_GROUPS = 2
+
+
+def _build_compact_table(rows: list[ReportRow], report_config: ReportConfig) -> Table:
+    """Build the compact layout: Date/Systolic/Diastolic/Pulse only, side by side.
+
+    Readings fill one column group top-to-bottom before moving to the next
+    group, so a full page of readings doesn't leave most of the page width
+    empty the way a single narrow table would. Two groups (not three, like
+    the scale daemon's weight-only "simple" layout) since each BP reading
+    needs more columns to mean anything on its own.
+
+    Args:
+        rows: Reading rows to include, oldest first.
+        report_config: Controls the pressure unit and date/time format.
+
+    Returns:
+        A styled reportlab Table.
+    """
+    _, _, unit_label = _pressure_values(rows[0], report_config.unit)
+    groups = min(_COMPACT_LAYOUT_COLUMN_GROUPS, len(rows))
+    rows_per_column = -(-len(rows) // groups)  # ceil division
+
+    group_header = ["Date/Time", f"Sys ({unit_label})", f"Dia ({unit_label})", "Pulse"]
+    header = group_header * groups
+    data = [header]
+    for r in range(rows_per_column):
+        line: list[object] = []
+        for g in range(groups):
+            idx = g * rows_per_column + r
+            if idx < len(rows):
+                row = rows[idx]
+                systolic, diastolic, _ = _pressure_values(row, report_config.unit)
+                line.append(_format_datetime(row.recorded_at, report_config.date_format))
+                line.append(f"{systolic:.0f}" if systolic is not None else "-")
+                line.append(f"{diastolic:.0f}" if diastolic is not None else "-")
+                line.append(row.pulse_bpm if row.pulse_bpm is not None else "-")
+            else:
+                line.extend(["", "", "", ""])
+        data.append(line)
+
+    align_cols = [i for i in range(len(header)) if i % 4 in (1, 2, 3)]
+    style_commands = _header_style_commands()
+    style_commands.extend(("ALIGN", (idx, 1), (idx, -1), "RIGHT") for idx in align_cols)
+
+    table = Table(data, repeatRows=1)
+    table.setStyle(TableStyle(style_commands))
+    return table
+
+
+def _rollup_key(recorded_at: datetime, period: str) -> tuple[int, int]:
+    """Return the (year, period-number) bucket a reading's local time falls in."""
+    local = recorded_at.astimezone()
+    if period == "month":
+        return (local.year, local.month)
+    iso_year, iso_week, _ = local.isocalendar()
+    return (iso_year, iso_week)
+
+
+def _rollup_label(key: tuple[int, int], period: str) -> str:
+    """Render a rollup bucket key as a human-readable period label."""
+    if period == "month":
+        year, month = key
+        return date(year, month, 1).strftime("%B %Y")
+    iso_year, iso_week = key
+    monday = date.fromisocalendar(iso_year, iso_week, 1)
+    sunday = monday + timedelta(days=6)
+    return f"{monday.strftime('%m/%d')}-{sunday.strftime('%m/%d')}/{iso_year}"
+
+
+def _range_str(values: list[float]) -> str:
+    """Format a list of values as "avg (min-max)", or "-" if empty."""
+    if not values:
+        return "-"
+    return f"{sum(values) / len(values):.0f} ({min(values):.0f}-{max(values):.0f})"
+
+
+def _build_rollup_buckets(
+    rows: list[ReportRow], period: str
+) -> dict[tuple[int, int], list[ReportRow]]:
+    """Group reading rows into weekly or monthly buckets, oldest bucket first.
+
+    Args:
+        rows: Reading rows to include, oldest first.
+        period: "week" (ISO calendar week) or "month" (calendar month).
+
+    Returns:
+        Bucket key -> rows in that bucket, in the same relative order as
+        ``rows`` (a plain dict preserves insertion order, and ``rows`` is
+        already oldest-first, so buckets come out oldest-first too).
+    """
+    buckets: dict[tuple[int, int], list[ReportRow]] = {}
+    for row in rows:
+        key = _rollup_key(row.recorded_at, period)
+        buckets.setdefault(key, []).append(row)
+    return buckets
+
+
+def _build_rollup_table(rows: list[ReportRow], report_config: ReportConfig) -> Table:
+    """Build the rollup layout: one row per week/month instead of per reading.
+
+    Each row shows the reading count, avg/min/max systolic and diastolic,
+    average pulse, and (if enabled) the worst AHA category seen in that
+    period -- a year of daily readings becomes ~52 rows instead of 365.
+
+    Args:
+        rows: Reading rows to include, oldest first.
+        report_config: Controls the pressure unit, date/time format, rollup
+            period, and whether the category column/shading is included.
+
+    Returns:
+        A styled reportlab Table.
+    """
+    _, _, unit_label = _pressure_values(rows[0], report_config.unit)
+    buckets = _build_rollup_buckets(rows, report_config.rollup_period)
+
+    header = [
+        "Period",
+        "Readings",
+        f"Systolic\navg (min-max) {unit_label}",
+        f"Diastolic\navg (min-max) {unit_label}",
+        "Pulse avg\n(bpm)",
+    ]
+    if report_config.include_categories:
+        header.append("Worst\nCategory")
+
+    data = [header]
+    worst_categories: list[str | None] = []
+    for key, bucket_rows in buckets.items():
+        pairs = [_pressure_values(r, report_config.unit)[:2] for r in bucket_rows]
+        systolic_values = [s for s, _ in pairs if s is not None]
+        diastolic_values = [d for _, d in pairs if d is not None]
+        pulse_values = [r.pulse_bpm for r in bucket_rows if r.pulse_bpm is not None]
+
+        worst_category = None
+        worst_rank = -1
+        for row in bucket_rows:
+            category = classify(row.systolic_mmhg, row.diastolic_mmhg)
+            rank = _CATEGORY_SEVERITY.get(category, -1)
+            if rank > worst_rank:
+                worst_rank = rank
+                worst_category = category
+        worst_categories.append(worst_category)
+
+        values: list[object] = [
+            _rollup_label(key, report_config.rollup_period),
+            len(bucket_rows),
+            _range_str(systolic_values),
+            _range_str(diastolic_values),
+            f"{sum(pulse_values) / len(pulse_values):.0f}" if pulse_values else "-",
+        ]
+        if report_config.include_categories:
+            values.append(worst_category or "-")
+        data.append(values)
+
+    numeric_cols = [1, 2, 3, 4]
+    style_commands = _header_style_commands()
+    style_commands.extend(("ALIGN", (idx, 1), (idx, -1), "RIGHT") for idx in numeric_cols)
+    if report_config.include_categories:
+        for row_index, category in enumerate(worst_categories, start=1):
+            color = _CATEGORY_COLORS.get(category, colors.white)
+            style_commands.append(("BACKGROUND", (0, row_index), (-1, row_index), color))
+            if category == CRISIS:
+                style_commands.append(
+                    ("TEXTCOLOR", (0, row_index), (-1, row_index), colors.white)
+                )
 
     table = Table(data, repeatRows=1)
     table.setStyle(TableStyle(style_commands))
@@ -654,7 +841,9 @@ def build_pdf(
         output_path: Filesystem path to write the PDF to.
         report_config: Controls which columns are shown, the pressure unit,
             the date/time format, the page size, whether a summary is
-            printed, and whether goal progress is included.
+            printed, whether goal progress is included, whether the chart
+            and/or table are included at all, and (if the table is
+            included) which layout it renders as (full/compact/rollup).
         patient_config: Optional patient name/email to print below the
             title (fields left blank are omitted), and the goal(s) used by
             ``report_config.include_goal_progress``.
@@ -682,9 +871,17 @@ def build_pdf(
     if report_config.include_goal_progress:
         elements.extend(_build_goal_progress_elements(rows, report_config, patient_config, styles))
 
-    elements.append(_build_chart(rows, report_config))
-    elements.append(Spacer(1, 0.2 * inch))
-    elements.append(_build_table(rows, report_config))
+    if report_config.include_chart:
+        elements.append(_build_chart(rows, report_config))
+        elements.append(Spacer(1, 0.2 * inch))
+
+    if report_config.include_table:
+        if report_config.table_layout == "compact":
+            elements.append(_build_compact_table(rows, report_config))
+        elif report_config.table_layout == "rollup":
+            elements.append(_build_rollup_table(rows, report_config))
+        else:
+            elements.append(_build_table(rows, report_config))
 
     doc.build(elements)
 

@@ -4,9 +4,14 @@ from datetime import datetime, timezone
 from etekcity_bp_daemon.config import DEFAULT_PATIENT_CONFIG, DEFAULT_REPORT_CONFIG
 from etekcity_bp_daemon.report import (
     _apply_profile_overrides,
+    _build_compact_table,
+    _build_rollup_table,
     _estimate_rate_per_day,
     _goal_progress_lines,
+    _range_str,
     _resolve_range,
+    _rollup_key,
+    _rollup_label,
     build_csv,
     build_pdf,
     fetch_rows,
@@ -224,3 +229,114 @@ def test_apply_profile_overrides_only_applies_set_fields():
 def test_apply_profile_overrides_noop_when_nothing_set():
     result = _apply_profile_overrides(DEFAULT_REPORT_CONFIG, DEFAULT_PATIENT_CONFIG)
     assert result == DEFAULT_REPORT_CONFIG
+
+
+def test_build_compact_table_fills_column_major(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    for i in range(5):
+        _record(store, f"2026-01-0{i + 1}T00:00:00+00:00", systolic=120 + i, diastolic=80 + i)
+    store.close()
+
+    rows = fetch_rows(db_path, None, None, None)
+    table = _build_compact_table(rows, DEFAULT_REPORT_CONFIG)
+    body = table._cellvalues
+
+    assert body[0] == ["Date/Time", "Sys (mmHg)", "Dia (mmHg)", "Pulse"] * 2
+    # 5 rows / 2 groups = ceil(2.5) = 3 rows per column; group 1 gets the
+    # first 3 readings top-to-bottom, group 2 gets the remaining 2 plus a
+    # blank pad row.
+    assert len(body) == 4
+    assert body[1][1] == "120"  # first reading, first group
+    assert body[1][5] == "123"  # fourth reading, second group
+    assert body[3][4:] == ["", "", "", ""]  # padded blank row
+
+
+def test_build_compact_table_fewer_rows_than_groups(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    _record(store, "2026-01-01T00:00:00+00:00")
+    store.close()
+
+    rows = fetch_rows(db_path, None, None, None)
+    table = _build_compact_table(rows, DEFAULT_REPORT_CONFIG)
+    # Only one reading -- should collapse to a single column group, not pad
+    # out a second empty one.
+    assert len(table._cellvalues[0]) == 4
+
+
+def test_rollup_key_and_label_week():
+    dt = datetime(2026, 1, 8, tzinfo=timezone.utc)
+    key = _rollup_key(dt, "week")
+    assert key == dt.astimezone().isocalendar()[:2]
+    label = _rollup_label(key, "week")
+    assert "/" in label and "-" in label
+
+
+def test_rollup_key_and_label_month():
+    dt = datetime(2026, 3, 15, tzinfo=timezone.utc)
+    key = _rollup_key(dt, "month")
+    local = dt.astimezone()
+    assert key == (local.year, local.month)
+    assert _rollup_label(key, "month") == local.strftime("%B %Y")
+
+
+def test_range_str():
+    assert _range_str([]) == "-"
+    assert _range_str([120.0]) == "120 (120-120)"
+    assert _range_str([120.0, 130.0, 110.0]) == "120 (110-130)"
+
+
+def test_build_rollup_table_buckets_by_week_and_flags_worst_category(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    # Same ISO week (Thu + Fri).
+    _record(store, "2026-01-01T00:00:00+00:00", systolic=115, diastolic=75)
+    _record(store, "2026-01-02T00:00:00+00:00", systolic=190, diastolic=125)
+    # Following week.
+    _record(store, "2026-01-08T00:00:00+00:00", systolic=120, diastolic=80)
+    store.close()
+
+    rows = fetch_rows(db_path, None, None, None)
+    table = _build_rollup_table(rows, DEFAULT_REPORT_CONFIG)
+    body = table._cellvalues
+
+    assert len(body) == 3  # header + 2 weekly buckets
+    assert body[1][1] == 2  # first bucket has 2 readings
+    assert body[1][-1] == "Hypertensive Crisis"  # worst of Normal/Crisis
+    assert body[2][1] == 1
+
+
+def test_build_rollup_table_monthly(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    _record(store, "2026-01-05T00:00:00+00:00")
+    _record(store, "2026-02-05T00:00:00+00:00")
+    store.close()
+
+    rows = fetch_rows(db_path, None, None, None)
+    monthly_config = replace(DEFAULT_REPORT_CONFIG, rollup_period="month")
+    table = _build_rollup_table(rows, monthly_config)
+    assert len(table._cellvalues) == 3  # header + 2 monthly buckets
+
+
+def test_build_pdf_layout_permutations(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    for i in range(3):
+        _record(store, f"2026-01-0{i + 1}T00:00:00+00:00", systolic=120 + i, diastolic=80 + i)
+    store.close()
+    rows = fetch_rows(db_path, None, None, None)
+
+    permutations = {
+        "chart_only": replace(DEFAULT_REPORT_CONFIG, include_table=False),
+        "table_only": replace(DEFAULT_REPORT_CONFIG, include_chart=False),
+        "compact": replace(DEFAULT_REPORT_CONFIG, table_layout="compact"),
+        "rollup": replace(DEFAULT_REPORT_CONFIG, table_layout="rollup"),
+        "neither": replace(DEFAULT_REPORT_CONFIG, include_chart=False, include_table=False),
+    }
+    for name, config in permutations.items():
+        output = str(tmp_path / f"{name}.pdf")
+        build_pdf(rows, output, config)
+        with open(output, "rb") as pdf_file:
+            assert pdf_file.read(4) == b"%PDF"

@@ -30,7 +30,8 @@ protocol may work.
   and motion flags) to a local SQLite database
 - Runs as a `systemd` service with automatic restart on failure
 - Optional PDF/CSV reports shaded by AHA blood-pressure category, with a
-  systolic/diastolic trend chart
+  systolic/diastolic trend chart and a choice of table layout (full,
+  compact, or a weekly/monthly rollup for long histories)
 - Optional Apprise-based alerting on stale data, hypertensive-crisis-range
   readings, or an irregular heartbeat
 - Optional read-only HTTP API and MQTT publishing
@@ -398,6 +399,15 @@ average/min/max summary with a category breakdown -- handy to print and
 bring to a doctor's appointment. `--profile <name>` (requires `--config`)
 also personalizes the report from that profile's `[profile.<name>]` section
 -- see [Per-profile report personalization](#per-profile-report-personalization).
+
+`report.include_chart`/`include_table` independently toggle the chart and
+table off if you don't want them, and `report.table_layout` picks the
+table's shape: `full` (one row per reading, the default), `compact` (same
+per-reading detail, packed into 2 side-by-side column groups), or `rollup`
+(one row per week/month -- avg/min/max, reading count, and the worst AHA
+category seen that period). For a long history, `rollup` paired with the
+chart is generally more useful than paging through a year of individual
+readings.
 
 ## Pruning old data
 
