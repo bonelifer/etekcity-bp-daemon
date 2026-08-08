@@ -31,6 +31,7 @@ class ReportConfig:
     include_profile: bool
     include_summary: bool
     include_categories: bool
+    include_goal_progress: bool
     unit: str  # "mmhg" or "kpa"
     date_format: str  # "us" or "world"
     page_size: str  # "letter" or "a4"
@@ -41,6 +42,7 @@ DEFAULT_REPORT_CONFIG = ReportConfig(
     include_profile=False,
     include_summary=True,
     include_categories=True,
+    include_goal_progress=False,
     unit="mmhg",
     date_format="world",
     page_size="letter",
@@ -49,6 +51,30 @@ DEFAULT_REPORT_CONFIG = ReportConfig(
 _UNITS = ("mmhg", "kpa")
 _DATE_FORMATS = ("us", "world")
 _PAGE_SIZES = ("letter", "a4")
+
+
+@dataclass
+class PatientConfig:
+    """A profile's identifying info and blood-pressure goal.
+
+    Loaded from a ``[profile.<name>]`` section (see ``load_profile_details``)
+    or left at these blanks/unset when no profile is selected.
+    """
+
+    name: str
+    email: str
+    unit: str  # "" (unset, use report.unit), "mmhg", or "kpa"
+    goal_systolic_mmhg: int | None  # None means unset
+    goal_diastolic_mmhg: int | None  # None means unset
+
+
+DEFAULT_PATIENT_CONFIG = PatientConfig(
+    name="",
+    email="",
+    unit="",
+    goal_systolic_mmhg=None,
+    goal_diastolic_mmhg=None,
+)
 
 
 @dataclass
@@ -272,9 +298,84 @@ def load_report_config(config_path: str) -> ReportConfig:
         include_categories=_parse_bool(
             report.get("include_categories", "yes"), "report.include_categories"
         ),
+        include_goal_progress=_parse_bool(
+            report.get("include_goal_progress", "no"), "report.include_goal_progress"
+        ),
         unit=unit,
         date_format=date_format,
         page_size=page_size,
+    )
+
+
+def load_profile_details(config_path: str, profile: str) -> PatientConfig:
+    """Load one ``[profile.<name>]`` section: name/email plus a blood-pressure goal.
+
+    Each profile is self-contained -- a missing section just falls back to
+    blanks/unset, since none of these fields are required for the daemon to
+    function; they only personalize a report if provided.
+
+    Args:
+        config_path: Path to the INI configuration file.
+        profile: The profile name, expected to match one of the names in
+            ``[profiles] names``.
+
+    Returns:
+        A ``PatientConfig`` for this profile (``name`` defaults to the
+        profile name itself if left blank). All fields are "unset" defaults
+        if the section doesn't exist at all.
+
+    Raises:
+        ConfigError: If the file is missing or a value is invalid.
+    """
+    path = Path(config_path)
+    if not path.is_file():
+        raise ConfigError(f"Config file not found: {path}")
+
+    parser = configparser.ConfigParser()
+    parser.read(path)
+
+    section_name = f"profile.{profile}"
+    if not parser.has_section(section_name):
+        return PatientConfig(
+            name=profile,
+            email="",
+            unit="",
+            goal_systolic_mmhg=None,
+            goal_diastolic_mmhg=None,
+        )
+
+    section = parser[section_name]
+
+    unit = section.get("unit", "").strip().lower()
+    if unit and unit not in _UNITS:
+        raise ConfigError(f"{section_name}.unit must be one of {_UNITS}, got {unit!r}")
+
+    goal_systolic_mmhg = None
+    goal_systolic_str = section.get("goal_systolic_mmhg", "").strip()
+    if goal_systolic_str:
+        try:
+            goal_systolic_mmhg = int(goal_systolic_str)
+        except ValueError as exc:
+            raise ConfigError(f"{section_name}.goal_systolic_mmhg must be an integer") from exc
+        if goal_systolic_mmhg <= 0:
+            raise ConfigError(f"{section_name}.goal_systolic_mmhg must be a positive number")
+
+    goal_diastolic_mmhg = None
+    goal_diastolic_str = section.get("goal_diastolic_mmhg", "").strip()
+    if goal_diastolic_str:
+        try:
+            goal_diastolic_mmhg = int(goal_diastolic_str)
+        except ValueError as exc:
+            raise ConfigError(f"{section_name}.goal_diastolic_mmhg must be an integer") from exc
+        if goal_diastolic_mmhg <= 0:
+            raise ConfigError(f"{section_name}.goal_diastolic_mmhg must be a positive number")
+
+    return PatientConfig(
+        name=section.get("name", "").strip() or profile,
+        email=section.get("email", "").strip(),
+        unit=unit,
+        goal_systolic_mmhg=goal_systolic_mmhg,
+        goal_diastolic_mmhg=goal_diastolic_mmhg,
     )
 
 

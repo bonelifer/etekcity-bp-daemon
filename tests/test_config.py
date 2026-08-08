@@ -8,6 +8,7 @@ from etekcity_bp_daemon.config import (
     load_api_config,
     load_config,
     load_mqtt_config,
+    load_profile_details,
     load_profiles_config,
     load_report_config,
     persist_discovered_address,
@@ -152,6 +153,51 @@ def test_load_profiles_config_invalid_assign_window(tmp_path):
     )
     with pytest.raises(ConfigError):
         load_profiles_config(config_path)
+
+
+def test_load_profile_details_missing_section_defaults_to_profile_name(tmp_path):
+    config_path = _write(tmp_path, _BASE_CONFIG)
+    patient = load_profile_details(config_path, "Alice")
+    assert patient.name == "Alice"
+    assert patient.email == ""
+    assert patient.unit == ""
+    assert patient.goal_systolic_mmhg is None
+    assert patient.goal_diastolic_mmhg is None
+
+
+def test_load_profile_details_full_section(tmp_path):
+    config_path = _write(
+        tmp_path,
+        _BASE_CONFIG
+        + "\n[profile.Alice]\n"
+        "name = Alice Smith\n"
+        "email = alice@example.com\n"
+        "unit = kpa\n"
+        "goal_systolic_mmhg = 130\n"
+        "goal_diastolic_mmhg = 80\n",
+    )
+    patient = load_profile_details(config_path, "Alice")
+    assert patient.name == "Alice Smith"
+    assert patient.email == "alice@example.com"
+    assert patient.unit == "kpa"
+    assert patient.goal_systolic_mmhg == 130
+    assert patient.goal_diastolic_mmhg == 80
+
+
+def test_load_profile_details_invalid_unit(tmp_path):
+    config_path = _write(
+        tmp_path, _BASE_CONFIG + "\n[profile.Alice]\nunit = pounds\n"
+    )
+    with pytest.raises(ConfigError):
+        load_profile_details(config_path, "Alice")
+
+
+def test_load_profile_details_invalid_goal(tmp_path):
+    config_path = _write(
+        tmp_path, _BASE_CONFIG + "\n[profile.Alice]\ngoal_systolic_mmhg = -5\n"
+    )
+    with pytest.raises(ConfigError):
+        load_profile_details(config_path, "Alice")
 
 
 def test_persist_discovered_address(tmp_path):

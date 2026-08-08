@@ -37,6 +37,8 @@ protocol may work.
 - Optional "who was this?" profile tagging for a device shared by more than
   two people, via ntfy or dunstify -- not limited to the device's own
   two-slot user distinction
+- Optional per-profile report personalization (name/email, preferred unit,
+  and a doctor-set blood-pressure goal with trend tracking)
 
 ## Installation
 
@@ -251,6 +253,35 @@ name was removed or renamed but readings tagged with the old name still
 exist, it prints a warning (not an error; the exit code stays `0`) so that
 history doesn't just silently stop being explainable.
 
+#### Per-profile report personalization
+
+Give a profile its own `[profile.<name>]` section (name/email, a preferred
+unit, and/or a blood-pressure goal), and `etekcity-bp-report --profile
+<name>` / the API's `?profile=` will use it:
+
+```ini
+[profile.Alice]
+name = Alice Smith
+email = alice@example.com
+unit = mmhg
+goal_systolic_mmhg = 130
+goal_diastolic_mmhg = 80
+```
+
+- `name`/`email` print below the report title -- handy when handing a
+  printed report to a doctor.
+- `unit` overrides `report.unit` for this profile's reports only, so one
+  household member can see mmHg while another sees kPa.
+- `goal_systolic_mmhg`/`goal_diastolic_mmhg` (either or both, independently)
+  enable `report.include_goal_progress = yes`: the current average against
+  the goal, and whether it's trending toward or away from it based on a
+  linear fit across the report's date range. Since the goal is a ceiling
+  ("keep it under X/Y"), a falling trend is favorable regardless of whether
+  the current average happens to be over or under it yet.
+
+None of this is required -- a profile with no `[profile.<name>]` section at
+all still tags and reports normally, just without the personalization.
+
 ### Docker
 
 ```bash
@@ -320,7 +351,9 @@ etekcity-bp-report --config /etc/etekcity-bp-daemon/config.ini --profile Alice
 PDF reports include a systolic/diastolic trend chart, a reading table shaded
 by AHA blood-pressure category, and (if `report.include_summary = yes`) an
 average/min/max summary with a category breakdown -- handy to print and
-bring to a doctor's appointment.
+bring to a doctor's appointment. `--profile <name>` (requires `--config`)
+also personalizes the report from that profile's `[profile.<name>]` section
+-- see [Per-profile report personalization](#per-profile-report-personalization).
 
 ## Pruning old data
 

@@ -45,6 +45,14 @@ date_format = world
 # PDF page size: letter or a4
 page_size = letter
 
+# Print a "Goal Progress" section (current average vs. goal, and whether
+# trending toward or away from it) for the selected --profile <name> /
+# ?profile=<name>. Unlike the section itself erroring, a profile with no
+# goal_systolic_mmhg/goal_diastolic_mmhg set (or no --profile given at all)
+# just prints a note instead, since there's no correctness risk in simply
+# not showing a goal. PDF only; see [profile.<name>] below.
+include_goal_progress = no
+
 [mqtt]
 # Publish each reading to an MQTT broker as JSON. Defaults to no. A broker
 # outage is logged and non-fatal -- it never blocks local recording.
@@ -138,3 +146,29 @@ dunstify_timeout_seconds = 30
 # returns -- silently tagging a now-stale reading. 0 disables the check
 # (the default). Only relevant when [api] is enabled.
 assign_window_seconds = 0
+
+# One [profile.<name>] section per name listed in [profiles] names above:
+# optional name/email printed below the title in PDF reports (e.g. for
+# handing a report to a doctor -- leave either blank to omit that line),
+# plus a personal unit preference and blood-pressure goal. A missing
+# section just falls back to blanks/unset -- none of this is required for
+# tagging to work, it only personalizes a report if provided.
+#
+# unit (mmhg or kpa) overrides report.unit for this profile's reports only
+# -- leave blank to just use report.unit. Handy when people sharing a
+# device think in different units.
+#
+# goal_systolic_mmhg / goal_diastolic_mmhg are a target set by a doctor
+# (e.g. "keep it under 130/80"), used by report.include_goal_progress.
+# Either or both may be set independently; leave blank to skip that metric.
+#
+# [profile.Alice]
+# name = Alice Smith
+# email = alice@example.com
+# unit = mmhg
+# goal_systolic_mmhg = 130
+# goal_diastolic_mmhg = 80
+#
+# [profile.Bob]
+# name = Bob Jones
+# unit = kpa
