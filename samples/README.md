@@ -10,13 +10,15 @@ shading).
 Every layout/toggle sample is rendered twice, into two folders:
 
 - **[combined/](combined/)** -- both Alice's and Bob's readings in one
-  report. Since it spans more than one person, the chart gets one colored
-  line pair per person with a legend, the summary prints one avg/min/max
-  block per person, and the rollup layout adds a "Who" column instead of
-  averaging Alice's and Bob's numbers together.
+  report, the household view for a device shared by more than one person.
+  Since it spans more than one person, the chart gets one colored line pair
+  per person with a legend, the summary prints one avg/min/max block per
+  person, and the rollup layout adds a "Who" column instead of averaging
+  Alice's and Bob's numbers together.
 - **[single/](single/)** -- the same report, restricted to `--profile
-  Alice`. No legend, no "Who" column, one summary block -- just Alice's
-  data on its own.
+  Alice`, the report to print and bring to a doctor's appointment. No
+  legend, no "Who" column, one summary block -- just Alice's data on its
+  own.
 
 `single/` also has [full-with-goal-progress.pdf](single/full-with-goal-progress.pdf),
 which only makes sense for one profile at a time (goal progress reads a

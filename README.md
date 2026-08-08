@@ -426,7 +426,10 @@ chart is generally more useful than paging through a year of individual
 readings.
 
 See [samples/](samples/) for a rendered PDF of every layout/unit/date-format
-combination, plus the toggle and goal-progress demos above.
+combination, plus the toggle and goal-progress demos above --
+[samples/combined/](samples/combined/) for the whole household sharing one
+device, [samples/single/](samples/single/) for a single person's report to
+bring to a doctor's appointment.
 
 **Reports spanning more than one person are split per person, not blended.**
 If a report's rows include more than one distinct profile (or untagged
@@ -436,9 +439,11 @@ one colored line pair per person (with a legend), the summary prints one
 avg/min/max block per person, and the `rollup` layout adds a "Who" column
 and buckets by `(period, person)` instead of just `(period)`. The full/
 compact per-reading tables already label each row via the "Who" column
-(`report.include_profile = yes`), so they're unaffected. If you only want
-one person's data, pass `--profile <name>` (or `?profile=` via the API)
-rather than filtering the combined report after the fact.
+(`report.include_profile = yes`), so they're unaffected. This is the right
+default for a household report shared by everyone using the device, but if
+you want a single person's data instead -- e.g. to bring to a doctor's
+appointment -- pass `--profile <name>` (or `?profile=` via the API) rather
+than filtering the combined report after the fact.
 
 ## Pruning old data
 
