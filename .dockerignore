@@ -9,6 +9,7 @@ build
 dist
 tests
 .pytest_cache
+samples
 config/etekcity-bp-daemon.ini
 *.db
 *.db-journal

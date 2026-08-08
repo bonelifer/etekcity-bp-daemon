@@ -425,6 +425,9 @@ category seen that period). For a long history, `rollup` paired with the
 chart is generally more useful than paging through a year of individual
 readings.
 
+See [samples/](samples/) for a rendered PDF of every layout/unit/date-format
+combination, plus the toggle and goal-progress demos above.
+
 ## Pruning old data
 
 ```bash
