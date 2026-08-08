@@ -329,13 +329,19 @@ cp config/etekcity-bp-daemon.ini.example config/config.ini
 docker compose up -d
 ```
 
+Or use the prebuilt image instead of `docker compose build`'s local build:
+`ghcr.io/bonelifer/etekcity-bp-daemon:latest`. CI builds this image on every
+push to `main`, runs `--check-config` and a report generation inside it, and
+pushes it to GHCR -- so the image itself is exercised, but only its CLI
+tooling, not a live BLE connection (see below).
+
 BLE access from inside a container needs the host's D-Bus system bus and
 Bluetooth adapter, which `docker-compose.yml` reaches via `network_mode:
-host` and a `/var/run/dbus` bind mount. **This is unverified** -- BLE from
-containers is finicky across host setups; the bare-metal `systemd` install
-is the well-tested path. If Docker doesn't see the adapter, try running the
-container with `--privileged` or check that BlueZ's D-Bus service is
-reachable at the mounted socket.
+host` and a `/var/run/dbus` bind mount. **This part is unverified** -- BLE
+from containers is finicky across host setups; the bare-metal `systemd`
+install is the well-tested path. If Docker doesn't see the adapter, try
+running the container with `--privileged` or check that BlueZ's D-Bus
+service is reachable at the mounted socket.
 
 ## Manual usage
 

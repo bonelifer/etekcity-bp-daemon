@@ -1,0 +1,15 @@
+.git
+.github
+__pycache__
+*.py[cod]
+*.egg-info
+.venv
+venv
+build
+dist
+tests
+.pytest_cache
+config/etekcity-bp-daemon.ini
+*.db
+*.db-journal
+*.log
