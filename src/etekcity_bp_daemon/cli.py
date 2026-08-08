@@ -45,9 +45,12 @@ async def discover_device(adapter: str | None, timeout: float = 60.0) -> str:
     """Scan for the first advertisement matching a supported device.
 
     Args:
-        adapter: Optional BLE adapter to scan with (Linux only; currently
-            unused by the discovery helper itself, forwarded for parity
-            with the daemon's other BLE calls).
+        adapter: Currently ignored -- etekcity_bp_ble.discover() takes no
+            adapter argument, unlike BloodPressureMonitor's per-device
+            connection once an address is known. Still accepted here so
+            callers pass the same `config.adapter` value they use
+            everywhere else; it just has no effect until the library
+            supports adapter selection during discovery.
         timeout: Seconds to scan before giving up.
 
     Returns:

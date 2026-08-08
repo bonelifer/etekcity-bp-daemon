@@ -844,9 +844,9 @@ def build_pdf(
             printed, whether goal progress is included, whether the chart
             and/or table are included at all, and (if the table is
             included) which layout it renders as (full/compact/rollup).
-        patient_config: Optional patient name/email to print below the
-            title (fields left blank are omitted), and the goal(s) used by
-            ``report_config.include_goal_progress``.
+        patient_config: Optional patient name/email/notes to print below
+            the title (fields left blank are omitted), and the goal(s)
+            used by ``report_config.include_goal_progress``.
     """
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(output_path, pagesize=_PAGE_SIZES[report_config.page_size])
@@ -929,8 +929,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--profile",
         help=(
             "Restrict to readings tagged with this profile name (requires "
-            "--config); also supplies the name/email/unit/goal shown on a "
-            "PDF report from that profile's [profile.<name>] section"
+            "--config); also personalizes the report (name/email/notes, "
+            "unit/date-format/page-size overrides, goals) from that "
+            "profile's [profile.<name>] section"
         ),
     )
     return parser.parse_args(argv)
