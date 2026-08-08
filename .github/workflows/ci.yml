@@ -23,3 +23,76 @@ jobs:
 
       - name: Test
         run: pytest -q
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Smoke test
+        run: ./scripts/smoke-test.sh
+
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t etekcity-bp-daemon:ci .
+
+      - name: Verify console scripts
+        run: |
+          docker run --rm --entrypoint etekcity-bp-daemon etekcity-bp-daemon:ci --version
+          docker run --rm --entrypoint etekcity-bp-report etekcity-bp-daemon:ci --version
+          docker run --rm --entrypoint etekcity-bp-prune etekcity-bp-daemon:ci --version
+
+      - name: Create fixture database and config
+        run: |
+          mkdir -p /tmp/docker-fixture
+          python3 scripts/make-fixture-db.py /tmp/docker-fixture/readings.db
+          cat > /tmp/docker-fixture/config.ini <<'EOF'
+          [monitor]
+          address = AA:BB:CC:DD:EE:FF
+          [storage]
+          db_path = /etc/etekcity-bp-daemon/readings.db
+          [daemon]
+          log_level = INFO
+          EOF
+
+      - name: Check config inside container
+        run: |
+          docker run --rm -v /tmp/docker-fixture:/etc/etekcity-bp-daemon \
+            etekcity-bp-daemon:ci \
+            --config /etc/etekcity-bp-daemon/config.ini --check-config
+
+      - name: Generate a report inside container
+        run: |
+          docker run --rm -v /tmp/docker-fixture:/etc/etekcity-bp-daemon \
+            --entrypoint etekcity-bp-report \
+            etekcity-bp-daemon:ci \
+            --config /etc/etekcity-bp-daemon/config.ini --output /etc/etekcity-bp-daemon/report.pdf
+          test -s /tmp/docker-fixture/report.pdf
+
+      # Only publishes on pushes to main -- a PR's CI run builds and smoke
+      # tests the image (above) but never reaches these steps, since
+      # github.event_name is "pull_request" there, not "push".
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Tag and push image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/etekcity-bp-daemon"
+          docker tag etekcity-bp-daemon:ci "${image}:latest"
+          docker tag etekcity-bp-daemon:ci "${image}:${{ github.sha }}"
+          docker push "${image}:latest"
+          docker push "${image}:${{ github.sha }}"
