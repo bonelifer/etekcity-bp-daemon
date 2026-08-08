@@ -1,8 +1,9 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from etekcity_bp_daemon.config import DEFAULT_REPORT_CONFIG, PatientConfig
+from etekcity_bp_daemon.config import DEFAULT_PATIENT_CONFIG, DEFAULT_REPORT_CONFIG
 from etekcity_bp_daemon.report import (
+    _apply_profile_overrides,
     _estimate_rate_per_day,
     _goal_progress_lines,
     _resolve_range,
@@ -115,11 +116,12 @@ def test_goal_progress_lines_no_goal_set(tmp_path):
     store.close()
 
     rows = fetch_rows(db_path, None, None, None)
-    patient = PatientConfig(
-        name="Alice", email="", unit="", goal_systolic_mmhg=None, goal_diastolic_mmhg=None
-    )
+    patient = replace(DEFAULT_PATIENT_CONFIG, name="Alice")
     lines = _goal_progress_lines(rows, DEFAULT_REPORT_CONFIG, patient)
-    assert "No goal_systolic_mmhg/goal_diastolic_mmhg set for this profile." in lines
+    assert (
+        "No goal_systolic_mmhg/goal_diastolic_mmhg/goal_pulse_bpm set for this profile."
+        in lines
+    )
 
 
 def test_goal_progress_lines_over_goal_and_trending_toward_it(tmp_path):
@@ -130,8 +132,8 @@ def test_goal_progress_lines_over_goal_and_trending_toward_it(tmp_path):
     store.close()
 
     rows = fetch_rows(db_path, None, None, None)
-    patient = PatientConfig(
-        name="Alice", email="", unit="", goal_systolic_mmhg=130, goal_diastolic_mmhg=80
+    patient = replace(
+        DEFAULT_PATIENT_CONFIG, name="Alice", goal_systolic_mmhg=130, goal_diastolic_mmhg=80
     )
     lines = _goal_progress_lines(rows, DEFAULT_REPORT_CONFIG, patient)
     joined = " ".join(lines)
@@ -147,8 +149,8 @@ def test_goal_progress_lines_respects_kpa_display_unit(tmp_path):
     store.close()
 
     rows = fetch_rows(db_path, None, None, None)
-    patient = PatientConfig(
-        name="Alice", email="", unit="", goal_systolic_mmhg=130, goal_diastolic_mmhg=80
+    patient = replace(
+        DEFAULT_PATIENT_CONFIG, name="Alice", goal_systolic_mmhg=130, goal_diastolic_mmhg=80
     )
     kpa_report_config = replace(DEFAULT_REPORT_CONFIG, unit="kpa")
     lines = _goal_progress_lines(rows, kpa_report_config, patient)
@@ -167,15 +169,58 @@ def test_build_pdf_with_patient_config_and_goal_progress(tmp_path):
 
     rows = fetch_rows(db_path, None, None, None)
     report_config = replace(DEFAULT_REPORT_CONFIG, include_goal_progress=True)
-    patient = PatientConfig(
+    patient = replace(
+        DEFAULT_PATIENT_CONFIG,
         name="Alice Smith",
         email="alice@example.com",
-        unit="",
+        notes="On lisinopril 10mg",
         goal_systolic_mmhg=130,
         goal_diastolic_mmhg=80,
+        goal_pulse_bpm=70,
     )
     output = str(tmp_path / "report.pdf")
     build_pdf(rows, output, report_config, patient)
 
     with open(output, "rb") as pdf_file:
         assert pdf_file.read(4) == b"%PDF"
+
+
+def test_goal_progress_lines_includes_pulse_goal_without_unit_conversion(tmp_path):
+    db_path = str(tmp_path / "readings.db")
+    store = ReadingStore(db_path)
+    store.record(
+        recorded_at="2026-01-01T00:00:00+00:00",
+        address=_ADDRESS,
+        user=0,
+        profile=None,
+        systolic_mmhg=120,
+        diastolic_mmhg=80,
+        systolic_kpa=16.0,
+        diastolic_kpa=10.7,
+        pulse_bpm=95,
+        irregular_heartbeat=False,
+        motion_detected=False,
+        display_unit="MMHG",
+        error_code="OK",
+    )
+    store.close()
+
+    rows = fetch_rows(db_path, None, None, None)
+    kpa_report_config = replace(DEFAULT_REPORT_CONFIG, unit="kpa")
+    patient = replace(DEFAULT_PATIENT_CONFIG, goal_pulse_bpm=70)
+    lines = _goal_progress_lines(rows, kpa_report_config, patient)
+    joined = " ".join(lines)
+    assert "Pulse: current 95, goal 70 bpm (25 bpm over goal)" in joined
+
+
+def test_apply_profile_overrides_only_applies_set_fields():
+    patient = replace(DEFAULT_PATIENT_CONFIG, unit="kpa")
+    result = _apply_profile_overrides(DEFAULT_REPORT_CONFIG, patient)
+    assert result.unit == "kpa"
+    assert result.date_format == DEFAULT_REPORT_CONFIG.date_format
+    assert result.page_size == DEFAULT_REPORT_CONFIG.page_size
+
+
+def test_apply_profile_overrides_noop_when_nothing_set():
+    result = _apply_profile_overrides(DEFAULT_REPORT_CONFIG, DEFAULT_PATIENT_CONFIG)
+    assert result == DEFAULT_REPORT_CONFIG

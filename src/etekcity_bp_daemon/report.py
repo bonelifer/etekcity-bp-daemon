@@ -204,6 +204,33 @@ def _who(row: ReportRow) -> str:
     return row.profile or f"User {row.user + 1}"
 
 
+def _apply_profile_overrides(
+    report_config: ReportConfig, patient_config: PatientConfig
+) -> ReportConfig:
+    """Apply a profile's unit/date_format/page_size overrides onto report_config.
+
+    Each override is independent and only applied if the profile actually
+    set it, so e.g. one household member can override just the unit while
+    still using the shared date_format and page_size.
+
+    Args:
+        report_config: The base (shared) report configuration.
+        patient_config: Supplies the profile's overrides, if any.
+
+    Returns:
+        A copy of ``report_config`` with the profile's overrides applied,
+        or ``report_config`` unchanged if the profile set none of them.
+    """
+    overrides = {}
+    if patient_config.unit:
+        overrides["unit"] = patient_config.unit
+    if patient_config.date_format:
+        overrides["date_format"] = patient_config.date_format
+    if patient_config.page_size:
+        overrides["page_size"] = patient_config.page_size
+    return replace(report_config, **overrides) if overrides else report_config
+
+
 def build_csv(rows: list[ReportRow], output_path: str, report_config: ReportConfig) -> None:
     """Write reading rows to a CSV file.
 
@@ -471,18 +498,20 @@ def _convert_mmhg(value_mmhg: float, unit: str) -> float:
 
 
 def _goal_metric_lines(
-    label: str, rows: list[ReportRow], goal_mmhg: int, unit: str, value_of
+    label: str, rows: list[ReportRow], goal_native: float, unit_label: str, convert, value_of
 ) -> list[str]:
-    """Build current/goal/remaining/trend lines for one metric (systolic or diastolic).
+    """Build current/goal/remaining/trend lines for one metric.
 
     Args:
-        label: "Systolic" or "Diastolic", for the rendered text.
+        label: "Systolic", "Diastolic", or "Pulse", for the rendered text.
         rows: Reading rows to include, oldest first.
-        goal_mmhg: The profile's goal for this metric, always in mmHg
-            regardless of the report's display unit.
-        unit: The report's display unit ("mmhg" or "kpa") -- current and
-            goal are converted into this for the rendered text.
-        value_of: Extracts this metric's mmHg value from a ReportRow.
+        goal_native: The profile's goal for this metric, in its native unit
+            (mmHg for pressure, bpm for pulse) regardless of the report's
+            display unit.
+        unit_label: The unit label to render (e.g. "mmHg", "kPa", "bpm").
+        convert: Converts a native-unit value to the display unit (identity
+            for pulse, which has no unit to convert).
+        value_of: Extracts this metric's native-unit value from a ReportRow.
 
     Returns:
         Text lines, empty if no row has a value for this metric.
@@ -491,17 +520,16 @@ def _goal_metric_lines(
     if not valued:
         return []
 
-    current_mmhg = value_of(valued[-1])
-    remaining_mmhg = current_mmhg - goal_mmhg
-    unit_label = "kPa" if unit == "kpa" else "mmHg"
+    current_native = value_of(valued[-1])
+    remaining_native = current_native - goal_native
 
-    if remaining_mmhg > 0:
-        status = f"{_convert_mmhg(remaining_mmhg, unit):.0f} {unit_label} over goal"
+    if remaining_native > 0:
+        status = f"{convert(remaining_native):.0f} {unit_label} over goal"
     else:
         status = "at or under goal"
 
-    current_display = _convert_mmhg(current_mmhg, unit)
-    goal_display = _convert_mmhg(goal_mmhg, unit)
+    current_display = convert(current_native)
+    goal_display = convert(goal_native)
     lines = [
         f"{label}: current {current_display:.0f}, goal {goal_display:.0f} "
         f"{unit_label} ({status})"
@@ -511,7 +539,8 @@ def _goal_metric_lines(
         # The goal is a ceiling (e.g. "keep it under 130/80"), so a falling
         # rate is favorable and a rising rate is unfavorable regardless of
         # whether the current reading happens to be over or under it yet.
-        # Computed in mmHg -- a positive unit conversion can't flip its sign.
+        # Computed in the native unit -- a positive conversion factor can't
+        # flip its sign.
         rate = _estimate_rate_per_day(valued, value_of)
         if rate < 0:
             lines.append("  Trending toward goal (decreasing) at the current rate of change.")
@@ -530,14 +559,26 @@ def _goal_progress_lines(
         rows: Reading rows to include, oldest first.
         report_config: Supplies the display unit to render current/goal in.
         patient_config: Supplies the profile's goal_systolic_mmhg /
-            goal_diastolic_mmhg, either or both of which may be unset.
+            goal_diastolic_mmhg / goal_pulse_bpm, any of which may be unset.
 
     Returns:
-        Text lines. A note if neither goal is set or no readings have
-        pressure data, otherwise one or two metric summaries.
+        Text lines. A note if no goal is set or no readings have data for
+        any goal metric, otherwise one summary per configured goal.
     """
-    if patient_config.goal_systolic_mmhg is None and patient_config.goal_diastolic_mmhg is None:
-        return ["No goal_systolic_mmhg/goal_diastolic_mmhg set for this profile."]
+    if (
+        patient_config.goal_systolic_mmhg is None
+        and patient_config.goal_diastolic_mmhg is None
+        and patient_config.goal_pulse_bpm is None
+    ):
+        return [
+            "No goal_systolic_mmhg/goal_diastolic_mmhg/goal_pulse_bpm set for this profile."
+        ]
+
+    unit = report_config.unit
+    pressure_unit_label = "kPa" if unit == "kpa" else "mmHg"
+
+    def convert_pressure(value_mmhg: float) -> float:
+        return _convert_mmhg(value_mmhg, unit)
 
     lines: list[str] = []
     if patient_config.goal_systolic_mmhg is not None:
@@ -546,7 +587,8 @@ def _goal_progress_lines(
                 "Systolic",
                 rows,
                 patient_config.goal_systolic_mmhg,
-                report_config.unit,
+                pressure_unit_label,
+                convert_pressure,
                 lambda r: r.systolic_mmhg,
             )
         )
@@ -556,12 +598,24 @@ def _goal_progress_lines(
                 "Diastolic",
                 rows,
                 patient_config.goal_diastolic_mmhg,
-                report_config.unit,
+                pressure_unit_label,
+                convert_pressure,
                 lambda r: r.diastolic_mmhg,
             )
         )
+    if patient_config.goal_pulse_bpm is not None:
+        lines.extend(
+            _goal_metric_lines(
+                "Pulse",
+                rows,
+                patient_config.goal_pulse_bpm,
+                "bpm",
+                lambda value: value,
+                lambda r: r.pulse_bpm,
+            )
+        )
 
-    return lines or ["No readings with pressure data in this report's range."]
+    return lines or ["No readings with data for the configured goal(s) in this report's range."]
 
 
 def _build_goal_progress_elements(
@@ -619,6 +673,8 @@ def build_pdf(
         elements.append(Paragraph(f"Patient: {escape(patient_config.name)}", styles["Normal"]))
     if patient_config.email:
         elements.append(Paragraph(f"Email: {escape(patient_config.email)}", styles["Normal"]))
+    if patient_config.notes:
+        elements.append(Paragraph(f"Notes: {escape(patient_config.notes)}", styles["Normal"]))
     if report_config.include_summary:
         elements.extend(_summary_paragraphs(rows, report_config, styles))
     elements.append(Spacer(1, 0.2 * inch))
@@ -726,12 +782,10 @@ def main(argv: list[str] | None = None) -> int:
         print("No readings found for the given range/filters.")
         return 1
 
-    # A profile's own unit (if set) overrides report.unit for its reports,
-    # so e.g. one household member can see mmHg while another sees kPa
-    # regardless of the shared config default.
-    effective_report_config = report_config
-    if patient_config.unit:
-        effective_report_config = replace(report_config, unit=patient_config.unit)
+    # A profile's own unit/date_format/page_size (if set) override the
+    # shared report config for its reports, so e.g. one household member
+    # can see mmHg while another sees kPa.
+    effective_report_config = _apply_profile_overrides(report_config, patient_config)
 
     if args.format == "csv":
         build_csv(rows, output, effective_report_config)

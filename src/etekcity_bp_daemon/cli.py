@@ -30,6 +30,7 @@ from .config import (
     load_api_config,
     load_config,
     load_mqtt_config,
+    load_profile_details,
     load_profiles_config,
     load_report_config,
     persist_discovered_address,
@@ -498,9 +499,17 @@ def _check_config(config_path: str) -> int:
         )
 
     orphaned_profiles: list[str] = []
+    profile_details_valid = 0
     if not errors:
         tagged_profiles = get_distinct_profiles(daemon_config.db_path)
         orphaned_profiles = sorted(tagged_profiles - set(profiles_config.names))
+
+        for name in profiles_config.names:
+            try:
+                load_profile_details(config_path, name)
+                profile_details_valid += 1
+            except ConfigError as exc:
+                errors.append(str(exc))
 
     if errors:
         print(f"{config_path}: INVALID")
@@ -544,7 +553,8 @@ def _check_config(config_path: str) -> int:
         "  profiles: enabled="
         f"{'yes' if profiles_config.enabled else 'no'} "
         f"names={len(profiles_config.names)} "
-        f"path={'ntfy' if api_config.enabled else 'dunstify'}"
+        f"path={'ntfy' if api_config.enabled else 'dunstify'} "
+        f"details_valid={profile_details_valid}/{len(profiles_config.names)}"
     )
     if orphaned_profiles:
         print(

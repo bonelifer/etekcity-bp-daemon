@@ -5,17 +5,39 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import apprise
 
 from ._version import __version__
-from .config import AlertConfig, ConfigError, load_alert_config, load_config
+from .config import (
+    AlertConfig,
+    ConfigError,
+    PatientConfig,
+    load_alert_config,
+    load_config,
+    load_profile_details,
+    load_profiles_config,
+)
 
 # Minimum time between repeat staleness alerts for the same user slot, so a
 # once-hourly check doesn't re-notify every single run while data stays old.
 _STALE_ALERT_THROTTLE = timedelta(days=1)
+
+
+@dataclass
+class Alert:
+    """One triggered alert and the Apprise URLs it should be sent to.
+
+    Routing is per-alert rather than global because a profile can override
+    ``apprise_urls`` (see ``_effective_apprise_urls``) -- Alice's alerts and
+    Bob's alerts don't necessarily go to the same place.
+    """
+
+    urls: list[str]
+    message: str
 
 
 def _load_state(state_path: str) -> dict[str, dict[str, str]]:
@@ -52,7 +74,7 @@ def _latest_reading(db_path: str, address: str, user: int) -> tuple | None:
     connection = sqlite3.connect(db_path)
     try:
         return connection.execute(
-            "SELECT recorded_at, systolic_mmhg, diastolic_mmhg, irregular_heartbeat "
+            "SELECT recorded_at, systolic_mmhg, diastolic_mmhg, irregular_heartbeat, profile "
             "FROM readings WHERE address = ? AND user = ? "
             "ORDER BY recorded_at DESC LIMIT 1",
             (address, user),
@@ -61,9 +83,40 @@ def _latest_reading(db_path: str, address: str, user: int) -> tuple | None:
         connection.close()
 
 
+def _effective_stale_after_days(alert_config: AlertConfig, patient: PatientConfig | None) -> int:
+    """Resolve the staleness threshold: the profile's override, or the global default."""
+    if patient is not None and patient.stale_after_days is not None:
+        return patient.stale_after_days
+    return alert_config.stale_after_days
+
+
+def _effective_alert_on_irregular_heartbeat(
+    alert_config: AlertConfig, patient: PatientConfig | None
+) -> bool:
+    """Resolve the irregular-heartbeat flag: the profile's override, or the global default."""
+    if patient is not None and patient.alert_on_irregular_heartbeat is not None:
+        return patient.alert_on_irregular_heartbeat
+    return alert_config.alert_on_irregular_heartbeat
+
+
+def _effective_apprise_urls(alert_config: AlertConfig, patient: PatientConfig | None) -> list[str]:
+    """Resolve notification targets: the profile's override, or the global default.
+
+    A profile's ``apprise_urls`` replaces the global list rather than
+    extending it, so routing is precise (Alice's alerts go to Alice) rather
+    than broadcasting everyone's readings to a shared list by default.
+    """
+    if patient is not None and patient.apprise_urls:
+        return patient.apprise_urls
+    return alert_config.apprise_urls
+
+
 def check_alerts(
-    db_path: str, alert_config: AlertConfig, now: datetime | None = None
-) -> list[str]:
+    db_path: str,
+    alert_config: AlertConfig,
+    profile_configs: dict[str, PatientConfig] | None = None,
+    now: datetime | None = None,
+) -> list[Alert]:
     """Evaluate staleness, hypertensive-range, and irregular-heartbeat conditions.
 
     Checked independently for every (address, user) slot with at least one
@@ -73,19 +126,32 @@ def check_alerts(
     repeats at most once per ``_STALE_ALERT_THROTTLE`` while the condition
     persists.
 
+    If the latest reading is tagged with a profile (see the daemon's
+    ntfy/dunstify tagging) and ``profile_configs`` has a
+    ``[profile.<name>]`` entry for it, that profile's ``stale_after_days``
+    / ``alert_on_irregular_heartbeat`` / ``apprise_urls`` override the
+    global ``[alerting]`` values for that slot's checks. Untagged readings
+    (profile tagging disabled, or not yet answered) always use the global
+    values. The hypertensive-crisis thresholds are never overridden --
+    they're a fixed medical definition, not a per-person preference.
+
     Args:
         db_path: Path to the SQLite database file.
         alert_config: Parsed [alerting] configuration.
+        profile_configs: Profile name -> PatientConfig, for resolving
+            per-profile overrides. None/empty means no overrides apply.
         now: Current UTC time; injectable for testing. Defaults to
             ``datetime.now(timezone.utc)``.
 
     Returns:
-        Triggered alert messages (empty if nothing was triggered). The
-        caller is responsible for actually sending them.
+        Triggered alerts (empty if nothing was triggered), each carrying
+        its own destination URLs. The caller is responsible for actually
+        sending them.
     """
     now = now or datetime.now(timezone.utc)
+    profile_configs = profile_configs or {}
     state = _load_state(alert_config.state_path)
-    messages: list[str] = []
+    alerts: list[Alert] = []
 
     for address, user in _all_address_users(db_path):
         key = f"{address}:{user}"
@@ -94,18 +160,30 @@ def check_alerts(
         if row is None:
             continue
 
-        recorded_at, systolic, diastolic, irregular_heartbeat = row
+        recorded_at, systolic, diastolic, irregular_heartbeat, profile = row
         latest_dt = datetime.fromisoformat(recorded_at)
         label = f"{address} (user {user + 1})"
+        if profile:
+            label = f"{profile} ({label})"
 
-        if alert_config.stale_after_days > 0:
-            if now - latest_dt > timedelta(days=alert_config.stale_after_days):
+        patient = profile_configs.get(profile) if profile else None
+        urls = _effective_apprise_urls(alert_config, patient)
+        stale_after_days = _effective_stale_after_days(alert_config, patient)
+        alert_on_irregular_heartbeat = _effective_alert_on_irregular_heartbeat(
+            alert_config, patient
+        )
+
+        if stale_after_days > 0:
+            if now - latest_dt > timedelta(days=stale_after_days):
                 last_alert = slot_state.get("last_stale_alert_at")
                 last_alert_dt = datetime.fromisoformat(last_alert) if last_alert else None
                 if last_alert_dt is None or now - last_alert_dt > _STALE_ALERT_THROTTLE:
-                    messages.append(
-                        f"No reading from {label} in over "
-                        f"{alert_config.stale_after_days} day(s) (last: {recorded_at})"
+                    alerts.append(
+                        Alert(
+                            urls,
+                            f"No reading from {label} in over {stale_after_days} day(s) "
+                            f"(last: {recorded_at})",
+                        )
                     )
                     slot_state["last_stale_alert_at"] = now.isoformat()
             else:
@@ -123,33 +201,58 @@ def check_alerts(
                     and diastolic >= crisis_diastolic
                 )
             ):
-                messages.append(
-                    f"Hypertensive-crisis-range reading from {label}: "
-                    f"{systolic}/{diastolic} mmHg -- seek medical attention"
+                alerts.append(
+                    Alert(
+                        urls,
+                        f"Hypertensive-crisis-range reading from {label}: "
+                        f"{systolic}/{diastolic} mmHg -- seek medical attention",
+                    )
                 )
 
-            if alert_config.alert_on_irregular_heartbeat and irregular_heartbeat:
-                messages.append(f"Irregular heartbeat detected on {label}'s latest reading")
+            if alert_on_irregular_heartbeat and irregular_heartbeat:
+                alerts.append(
+                    Alert(urls, f"Irregular heartbeat detected on {label}'s latest reading")
+                )
 
         slot_state["last_seen_recorded_at"] = recorded_at
         state[key] = slot_state
 
     _save_state(alert_config.state_path, state)
-    return messages
+    return alerts
 
 
-def send_alerts(apprise_urls: list[str], messages: list[str]) -> None:
-    """Send each message via Apprise to every configured notification URL.
+def send_alerts(alerts: list[Alert]) -> None:
+    """Send each alert via Apprise to its own destination URLs.
 
     Args:
-        apprise_urls: Apprise service URLs to notify.
-        messages: One notification is sent per message.
+        alerts: Alerts to send, each with its own resolved URL list (see
+            ``check_alerts``). An alert with no URLs (global list empty and
+            no profile override) is silently skipped -- there's nowhere to
+            send it.
     """
-    notifier = apprise.Apprise()
-    for url in apprise_urls:
-        notifier.add(url)
-    for message in messages:
-        notifier.notify(title="Etekcity Blood Pressure Alert", body=message)
+    for alert in alerts:
+        if not alert.urls:
+            continue
+        notifier = apprise.Apprise()
+        for url in alert.urls:
+            notifier.add(url)
+        notifier.notify(title="Etekcity Blood Pressure Alert", body=alert.message)
+
+
+def _load_profile_configs(config_path: str, names: list[str]) -> dict[str, PatientConfig]:
+    """Load every profile's [profile.<name>] section, for alert-override resolution.
+
+    Args:
+        config_path: Path to the INI configuration file.
+        names: Profile names to load (typically ``profiles_config.names``).
+
+    Returns:
+        Profile name -> PatientConfig.
+
+    Raises:
+        ConfigError: If any profile's section is invalid.
+    """
+    return {name: load_profile_details(config_path, name) for name in names}
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -184,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         db_path = load_config(args.config).db_path
         alert_config = load_alert_config(args.config)
+        profiles_config = load_profiles_config(args.config)
     except ConfigError as exc:
         print(f"Error: {exc}")
         return 1
@@ -192,14 +296,24 @@ def main(argv: list[str] | None = None) -> int:
         print("Alerting is disabled (alerting.enabled = no).")
         return 0
 
-    messages = check_alerts(db_path, alert_config)
-    if not messages:
+    try:
+        profile_configs = (
+            _load_profile_configs(args.config, profiles_config.names)
+            if profiles_config.enabled
+            else {}
+        )
+    except ConfigError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    alerts = check_alerts(db_path, alert_config, profile_configs)
+    if not alerts:
         print("No alerts triggered.")
         return 0
 
-    send_alerts(alert_config.apprise_urls, messages)
-    for message in messages:
-        print(f"ALERT: {message}")
+    send_alerts(alerts)
+    for alert in alerts:
+        print(f"ALERT: {alert.message}")
     return 0
 
 

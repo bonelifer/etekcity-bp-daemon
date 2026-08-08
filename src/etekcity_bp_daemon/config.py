@@ -55,25 +55,44 @@ _PAGE_SIZES = ("letter", "a4")
 
 @dataclass
 class PatientConfig:
-    """A profile's identifying info and blood-pressure goal.
+    """A profile's identifying info, report preferences, and alert overrides.
 
     Loaded from a ``[profile.<name>]`` section (see ``load_profile_details``)
-    or left at these blanks/unset when no profile is selected.
+    or left at these blanks/unset when no profile is selected. Report
+    fields (``unit``, ``date_format``, ``page_size``, goals) are consumed by
+    ``report.py``; alert fields (``apprise_urls``, ``stale_after_days``,
+    ``alert_on_irregular_heartbeat``) are consumed by ``alerting.py``. Every
+    field is optional -- a profile with no section at all still tags and
+    reports normally, just without personalization.
     """
 
     name: str
     email: str
+    notes: str
     unit: str  # "" (unset, use report.unit), "mmhg", or "kpa"
+    date_format: str  # "" (unset, use report.date_format), "us", or "world"
+    page_size: str  # "" (unset, use report.page_size), "letter", or "a4"
     goal_systolic_mmhg: int | None  # None means unset
     goal_diastolic_mmhg: int | None  # None means unset
+    goal_pulse_bpm: int | None  # None means unset
+    apprise_urls: list[str]  # empty means "use [alerting] apprise_urls"
+    stale_after_days: int | None  # None means "use [alerting] stale_after_days"
+    alert_on_irregular_heartbeat: bool | None  # None means "use [alerting]'s value"
 
 
 DEFAULT_PATIENT_CONFIG = PatientConfig(
     name="",
     email="",
+    notes="",
     unit="",
+    date_format="",
+    page_size="",
     goal_systolic_mmhg=None,
     goal_diastolic_mmhg=None,
+    goal_pulse_bpm=None,
+    apprise_urls=[],
+    stale_after_days=None,
+    alert_on_irregular_heartbeat=None,
 )
 
 
@@ -201,6 +220,25 @@ def _parse_bool(value: str, key: str) -> bool:
     raise ConfigError(f"{key} must be yes/no, got {value!r}")
 
 
+def _parse_optional_bool(value: str, key: str) -> bool | None:
+    """Parse a yes/no-style config value, or None if left blank (inherit).
+
+    Args:
+        value: Raw string from the config file.
+        key: Dotted key name, used in the error message.
+
+    Returns:
+        The parsed boolean, or None if ``value`` is blank.
+
+    Raises:
+        ConfigError: If ``value`` is non-blank and not a recognized yes/no
+            spelling.
+    """
+    if not value.strip():
+        return None
+    return _parse_bool(value, key)
+
+
 def load_config(config_path: str) -> DaemonConfig:
     """Load and validate the daemon configuration file.
 
@@ -307,12 +345,36 @@ def load_report_config(config_path: str) -> ReportConfig:
     )
 
 
+def _parse_positive_int(value: str, key: str) -> int | None:
+    """Parse an optional positive integer, or None if left blank.
+
+    Args:
+        value: Raw string from the config file.
+        key: Dotted key name, used in the error message.
+
+    Returns:
+        The parsed integer, or None if ``value`` is blank.
+
+    Raises:
+        ConfigError: If ``value`` is non-blank and not a positive integer.
+    """
+    if not value.strip():
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ConfigError(f"{key} must be an integer") from exc
+    if parsed <= 0:
+        raise ConfigError(f"{key} must be a positive number")
+    return parsed
+
+
 def load_profile_details(config_path: str, profile: str) -> PatientConfig:
-    """Load one ``[profile.<name>]`` section: name/email plus a blood-pressure goal.
+    """Load one ``[profile.<name>]`` section: identity, report prefs, alert overrides.
 
     Each profile is self-contained -- a missing section just falls back to
     blanks/unset, since none of these fields are required for the daemon to
-    function; they only personalize a report if provided.
+    function; they only personalize reports/alerts if provided.
 
     Args:
         config_path: Path to the INI configuration file.
@@ -339,9 +401,16 @@ def load_profile_details(config_path: str, profile: str) -> PatientConfig:
         return PatientConfig(
             name=profile,
             email="",
+            notes="",
             unit="",
+            date_format="",
+            page_size="",
             goal_systolic_mmhg=None,
             goal_diastolic_mmhg=None,
+            goal_pulse_bpm=None,
+            apprise_urls=[],
+            stale_after_days=None,
+            alert_on_irregular_heartbeat=None,
         )
 
     section = parser[section_name]
@@ -350,32 +419,59 @@ def load_profile_details(config_path: str, profile: str) -> PatientConfig:
     if unit and unit not in _UNITS:
         raise ConfigError(f"{section_name}.unit must be one of {_UNITS}, got {unit!r}")
 
-    goal_systolic_mmhg = None
-    goal_systolic_str = section.get("goal_systolic_mmhg", "").strip()
-    if goal_systolic_str:
-        try:
-            goal_systolic_mmhg = int(goal_systolic_str)
-        except ValueError as exc:
-            raise ConfigError(f"{section_name}.goal_systolic_mmhg must be an integer") from exc
-        if goal_systolic_mmhg <= 0:
-            raise ConfigError(f"{section_name}.goal_systolic_mmhg must be a positive number")
+    date_format = section.get("date_format", "").strip().lower()
+    if date_format and date_format not in _DATE_FORMATS:
+        raise ConfigError(
+            f"{section_name}.date_format must be one of {_DATE_FORMATS}, got {date_format!r}"
+        )
 
-    goal_diastolic_mmhg = None
-    goal_diastolic_str = section.get("goal_diastolic_mmhg", "").strip()
-    if goal_diastolic_str:
+    page_size = section.get("page_size", "").strip().lower()
+    if page_size and page_size not in _PAGE_SIZES:
+        raise ConfigError(
+            f"{section_name}.page_size must be one of {_PAGE_SIZES}, got {page_size!r}"
+        )
+
+    goal_systolic_mmhg = _parse_positive_int(
+        section.get("goal_systolic_mmhg", ""), f"{section_name}.goal_systolic_mmhg"
+    )
+    goal_diastolic_mmhg = _parse_positive_int(
+        section.get("goal_diastolic_mmhg", ""), f"{section_name}.goal_diastolic_mmhg"
+    )
+    goal_pulse_bpm = _parse_positive_int(
+        section.get("goal_pulse_bpm", ""), f"{section_name}.goal_pulse_bpm"
+    )
+
+    urls_raw = section.get("apprise_urls", "").strip()
+    apprise_urls = [url.strip() for url in urls_raw.split(",") if url.strip()]
+
+    stale_after_days = None
+    stale_after_days_str = section.get("stale_after_days", "").strip()
+    if stale_after_days_str:
         try:
-            goal_diastolic_mmhg = int(goal_diastolic_str)
+            stale_after_days = int(stale_after_days_str)
         except ValueError as exc:
-            raise ConfigError(f"{section_name}.goal_diastolic_mmhg must be an integer") from exc
-        if goal_diastolic_mmhg <= 0:
-            raise ConfigError(f"{section_name}.goal_diastolic_mmhg must be a positive number")
+            raise ConfigError(f"{section_name}.stale_after_days must be an integer") from exc
+        if stale_after_days < 0:
+            raise ConfigError(f"{section_name}.stale_after_days must be zero or positive")
+
+    alert_on_irregular_heartbeat = _parse_optional_bool(
+        section.get("alert_on_irregular_heartbeat", ""),
+        f"{section_name}.alert_on_irregular_heartbeat",
+    )
 
     return PatientConfig(
         name=section.get("name", "").strip() or profile,
         email=section.get("email", "").strip(),
+        notes=section.get("notes", "").strip(),
         unit=unit,
+        date_format=date_format,
+        page_size=page_size,
         goal_systolic_mmhg=goal_systolic_mmhg,
         goal_diastolic_mmhg=goal_diastolic_mmhg,
+        goal_pulse_bpm=goal_pulse_bpm,
+        apprise_urls=apprise_urls,
+        stale_after_days=stale_after_days,
+        alert_on_irregular_heartbeat=alert_on_irregular_heartbeat,
     )
 
 

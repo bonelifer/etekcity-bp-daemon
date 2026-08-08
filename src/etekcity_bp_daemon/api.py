@@ -12,7 +12,6 @@ import argparse
 import os
 import sqlite3
 import tempfile
-from dataclasses import replace
 from datetime import datetime, timezone
 
 from aiohttp import web
@@ -28,7 +27,7 @@ from .config import (
     load_profiles_config,
     load_report_config,
 )
-from .report import _resolve_range, build_csv, build_pdf, fetch_rows
+from .report import _apply_profile_overrides, _resolve_range, build_csv, build_pdf, fetch_rows
 from .storage import ensure_schema, get_reading_recorded_at, set_reading_profile
 
 _VALID_FORMATS = ("pdf", "csv")
@@ -240,12 +239,10 @@ async def handle_report(request: web.Request) -> web.Response:
             {"error": "no readings found for the given range/filters"}, status=404
         )
 
-    # A profile's own unit (if set) overrides report.unit for its reports,
-    # same reasoning as etekcity-bp-report --profile.
+    # A profile's own unit/date_format/page_size (if set) override the
+    # shared report config, same reasoning as etekcity-bp-report --profile.
     report_config = request.app["report_config"]
-    effective_report_config = report_config
-    if patient_config.unit:
-        effective_report_config = replace(report_config, unit=patient_config.unit)
+    effective_report_config = _apply_profile_overrides(report_config, patient_config)
 
     fd, temp_path = tempfile.mkstemp(suffix=f".{fmt}")
     os.close(fd)

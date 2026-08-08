@@ -147,28 +147,62 @@ dunstify_timeout_seconds = 30
 # (the default). Only relevant when [api] is enabled.
 assign_window_seconds = 0
 
-# One [profile.<name>] section per name listed in [profiles] names above:
-# optional name/email printed below the title in PDF reports (e.g. for
-# handing a report to a doctor -- leave either blank to omit that line),
-# plus a personal unit preference and blood-pressure goal. A missing
-# section just falls back to blanks/unset -- none of this is required for
-# tagging to work, it only personalizes a report if provided.
+# One [profile.<name>] section per name listed in [profiles] names above.
+# A missing section just falls back to blanks/unset -- none of this is
+# required for tagging to work, it only personalizes reports/alerts if
+# provided.
 #
-# unit (mmhg or kpa) overrides report.unit for this profile's reports only
-# -- leave blank to just use report.unit. Handy when people sharing a
-# device think in different units.
+# --- Report personalization (etekcity-bp-report --profile / API ?profile=) ---
 #
-# goal_systolic_mmhg / goal_diastolic_mmhg are a target set by a doctor
-# (e.g. "keep it under 130/80"), used by report.include_goal_progress.
-# Either or both may be set independently; leave blank to skip that metric.
+# name/email print below the title in PDF reports (e.g. for handing a
+# report to a doctor -- leave either blank to omit that line). notes is a
+# free-text line for clinical context (e.g. current medication).
+#
+# unit (mmhg or kpa) / date_format (us or world) / page_size (letter or a4)
+# each independently override the matching [report] setting for this
+# profile's reports only -- leave blank to just use the shared default.
+# Handy when people sharing a device think in different units or are used
+# to different date conventions.
+#
+# goal_systolic_mmhg / goal_diastolic_mmhg / goal_pulse_bpm are targets set
+# by a doctor (e.g. "keep it under 130/80, pulse under 70"), used by
+# report.include_goal_progress. Any subset may be set independently; leave
+# blank to skip that metric.
+#
+# --- Alert overrides (etekcity-bp-alert-check) ---
+#
+# These only apply to alerts triggered by readings tagged with this
+# profile (untagged readings always use the global [alerting] values).
+# Each is independent and optional:
+#
+# apprise_urls (comma-separated) replaces -- not adds to -- the global
+# [alerting] apprise_urls for this profile's alerts, so e.g. Alice's alerts
+# go to her phone and Bob's go to his instead of a shared list. Leave
+# blank to just use the global list.
+#
+# stale_after_days overrides [alerting] stale_after_days for this profile
+# (0 explicitly disables the check for them, blank means "inherit the
+# global value").
+#
+# alert_on_irregular_heartbeat (yes/no) overrides [alerting]
+# alert_on_irregular_heartbeat for this profile; leave blank to inherit.
+#
+# The hypertensive-crisis thresholds are never overridden per profile --
+# they're a fixed medical definition, not a personal preference.
 #
 # [profile.Alice]
 # name = Alice Smith
 # email = alice@example.com
+# notes = On lisinopril 10mg
 # unit = mmhg
 # goal_systolic_mmhg = 130
 # goal_diastolic_mmhg = 80
+# goal_pulse_bpm = 70
+# apprise_urls = tgram://bot_token/alice_chat_id
+# stale_after_days = 1
+# alert_on_irregular_heartbeat = yes
 #
 # [profile.Bob]
 # name = Bob Jones
 # unit = kpa
+# apprise_urls = tgram://bot_token/bob_chat_id
