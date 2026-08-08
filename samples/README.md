@@ -7,6 +7,13 @@ fixture dataset (Alice trending down toward her configured goal over six
 weeks; Bob with one hypertensive-crisis-range reading, to show category
 shading).
 
+Since the fixture has two people, every sample except
+[full-with-goal-progress.pdf](full-with-goal-progress.pdf) (which uses
+`--profile Alice`) also demonstrates the per-person split: the chart gets
+one colored line pair per person with a legend, the summary prints one
+avg/min/max block per person, and the rollup layout adds a "Who" column
+instead of averaging Alice's and Bob's numbers together.
+
 ## Table layout x unit x date format
 
 | File | Layout | Unit | Date format |
