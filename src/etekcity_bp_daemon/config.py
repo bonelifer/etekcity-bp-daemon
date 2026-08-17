@@ -195,7 +195,7 @@ class ProfilesConfig:
     ntfy_token: str
     api_base_url: str
     dunstify_timeout_seconds: int
-    assign_window_seconds: int  # 0 disables rejecting a late /assign-profile tag
+    assign_window_seconds: int  # 0 disables rejecting a late /api/v1/assign-profile tag
 
 
 DEFAULT_PROFILES_CONFIG = ProfilesConfig(
