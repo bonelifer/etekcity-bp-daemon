@@ -1,9 +1,12 @@
 """Lightweight local HTTP API: latest readings, on-demand reports, and profile tagging.
 
-Reads from (and, for /assign-profile, writes to) the same SQLite database
-as everything else in this package -- it's a standalone view onto that
-data, not part of the daemon's BLE connection lifecycle, so it works
+Reads from (and, for /api/v1/assign-profile, writes to) the same SQLite
+database as everything else in this package -- it's a standalone view onto
+that data, not part of the daemon's BLE connection lifecycle, so it works
 whether or not the daemon is currently running.
+
+All routes, including the unauthenticated ``/health`` and ``/capabilities``
+checks, live under the ``/api/v1/`` prefix.
 """
 
 from __future__ import annotations
@@ -18,11 +21,14 @@ from aiohttp import web
 
 from ._version import __version__
 from .config import (
+    DEFAULT_MQTT_CONFIG,
     DEFAULT_PATIENT_CONFIG,
     ApiConfig,
     ConfigError,
+    MqttConfig,
     load_api_config,
     load_config,
+    load_mqtt_config,
     load_profile_details,
     load_profiles_config,
     load_report_config,
@@ -125,12 +131,50 @@ def _require_auth(request: web.Request) -> web.Response | None:
 
 
 async def handle_health(request: web.Request) -> web.Response:
-    """GET /health -- unauthenticated liveness check."""
+    """GET /api/v1/health -- unauthenticated liveness check."""
     return web.json_response({"status": "ok", "version": __version__})
 
 
+async def handle_capabilities(request: web.Request) -> web.Response:
+    """GET /api/v1/capabilities -- unauthenticated description of what this daemon reports.
+
+    Static/config-derived facts about this daemon's data model, meant for a
+    Health Hub aggregator to introspect without hardcoding assumptions:
+    what it measures, how profiles work, why there's no measured-at
+    timestamp, and whether MQTT publishing is on.
+    """
+    mqtt_config: MqttConfig = request.app["mqtt_config"]
+    mqtt_capability: dict[str, object] = {"enabled": mqtt_config.enabled}
+    if mqtt_config.enabled:
+        mqtt_capability["topic_pattern"] = f"{mqtt_config.topic_prefix}/<address>/state"
+
+    return web.json_response(
+        {
+            "daemon": "etekcity-bp",
+            "api_version": "v1",
+            "measurement_types": ["systolic", "diastolic", "pulse"],
+            "measurement_modes": ["spot"],
+            "profile_model": (
+                "assignable -- readings are stored with a nullable profile and "
+                "tagged after the fact via /api/v1/assign-profile; the raw "
+                "device 'user' field (0/1) is only which of the device's two "
+                "internal memory slots the reading was stored under, not a "
+                "profile identity"
+            ),
+            "timestamp_fields": {
+                "recorded_at": (
+                    "arrival time at this daemon; the BLE protocol has no "
+                    "device-side clock/timestamp at all, so there is no "
+                    "measured_at distinct from received_at for this device"
+                )
+            },
+            "mqtt": mqtt_capability,
+        }
+    )
+
+
 async def handle_latest(request: web.Request) -> web.Response:
-    """GET /latest[?address=...&profile=...] -- most recent reading per user slot, as JSON."""
+    """GET /api/v1/latest[?address=...&profile=...] -- most recent reading per user slot, JSON."""
     unauthorized = _require_auth(request)
     if unauthorized is not None:
         return unauthorized
@@ -146,7 +190,7 @@ async def handle_latest(request: web.Request) -> web.Response:
 
 
 async def handle_assign_profile(request: web.Request) -> web.Response:
-    """POST /assign-profile?id=...&profile=...[&confirm=1] -- tag a reading.
+    """POST /api/v1/assign-profile?id=...&profile=...[&confirm=1] -- tag a reading.
 
     Accepts GET too, since notification action buttons (ntfy's http action
     in particular) are simplest to configure as a bare URL hit rather than
@@ -207,7 +251,7 @@ async def handle_assign_profile(request: web.Request) -> web.Response:
 
 
 async def handle_report(request: web.Request) -> web.Response:
-    """GET /report[?format=pdf|csv&period=...&from=...&to=...&address=...&profile=...].
+    """GET /api/v1/report[?format=pdf|csv&period=...&from=...&to=...&address=...&profile=...].
 
     Generates a report on demand using the same config-driven settings as
     ``etekcity-bp-report`` and returns it as a file download. Report
@@ -281,7 +325,12 @@ async def handle_report(request: web.Request) -> web.Response:
 
 
 def build_app(
-    config_path: str, db_path: str, api_config: ApiConfig, report_config, profiles_config
+    config_path: str,
+    db_path: str,
+    api_config: ApiConfig,
+    report_config,
+    profiles_config,
+    mqtt_config: MqttConfig | None = None,
 ) -> web.Application:
     """Build the aiohttp application with routes and shared state attached.
 
@@ -291,7 +340,11 @@ def build_app(
         db_path: Path to the SQLite database file.
         api_config: Supplies the auth token.
         report_config: Used for on-demand report generation.
-        profiles_config: Supplies the valid profile names for /assign-profile.
+        profiles_config: Supplies the valid profile names for
+            /api/v1/assign-profile.
+        mqtt_config: Supplies the MQTT enabled flag/topic prefix reported by
+            /api/v1/capabilities. Defaults to the disabled config if omitted
+            (e.g. in tests that don't care about MQTT).
 
     Returns:
         A configured, unstarted aiohttp Application.
@@ -302,11 +355,13 @@ def build_app(
     app["api_token"] = api_config.token
     app["report_config"] = report_config
     app["profiles_config"] = profiles_config
-    app.router.add_get("/health", handle_health)
-    app.router.add_get("/latest", handle_latest)
-    app.router.add_get("/report", handle_report)
-    app.router.add_get("/assign-profile", handle_assign_profile)
-    app.router.add_post("/assign-profile", handle_assign_profile)
+    app["mqtt_config"] = mqtt_config if mqtt_config is not None else DEFAULT_MQTT_CONFIG
+    app.router.add_get("/api/v1/health", handle_health)
+    app.router.add_get("/api/v1/capabilities", handle_capabilities)
+    app.router.add_get("/api/v1/latest", handle_latest)
+    app.router.add_get("/api/v1/report", handle_report)
+    app.router.add_get("/api/v1/assign-profile", handle_assign_profile)
+    app.router.add_post("/api/v1/assign-profile", handle_assign_profile)
     return app
 
 
@@ -345,6 +400,7 @@ def main(argv: list[str] | None = None) -> int:
         api_config = load_api_config(args.config)
         report_config = load_report_config(args.config)
         profiles_config = load_profiles_config(args.config)
+        mqtt_config = load_mqtt_config(args.config)
     except ConfigError as exc:
         print(f"Error: {exc}")
         return 1
@@ -362,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     ensure_schema(db_path)
-    app = build_app(args.config, db_path, api_config, report_config, profiles_config)
+    app = build_app(args.config, db_path, api_config, report_config, profiles_config, mqtt_config)
     print(f"Listening on http://{api_config.host}:{api_config.port}")
     web.run_app(app, host=api_config.host, port=api_config.port, print=None)
     return 0

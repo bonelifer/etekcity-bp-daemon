@@ -195,27 +195,31 @@ sudo systemctl enable --now etekcity-bp-api.service
 
 Endpoints:
 
+All routes are versioned under `/api/v1/`.
+
 | Method & path | Description |
 |---|---|
-| `GET /health` | Unauthenticated liveness check: `{"status": "ok", "version": "..."}`. |
-| `GET /latest[?address=...&profile=...]` | Most recent reading per user slot, as JSON. |
-| `GET /report[?format=pdf\|csv&period=...&from=...&to=...&address=...&profile=...]` | Generates a report on demand using the same `[report]` config as `etekcity-bp-report`, returned as a file download. |
-| `GET`/`POST /assign-profile?id=...&profile=...[&confirm=1]` | Tags a reading with a profile name (see [Profiles](#profiles)). |
+| `GET /api/v1/health` | Unauthenticated liveness check: `{"status": "ok", "version": "..."}`. |
+| `GET /api/v1/capabilities` | Unauthenticated description of what this daemon measures, its profile model, timestamp semantics, and MQTT status. |
+| `GET /api/v1/latest[?address=...&profile=...]` | Most recent reading per user slot, as JSON. |
+| `GET /api/v1/report[?format=pdf\|csv&period=...&from=...&to=...&address=...&profile=...]` | Generates a report on demand using the same `[report]` config as `etekcity-bp-report`, returned as a file download. |
+| `GET`/`POST /api/v1/assign-profile?id=...&profile=...[&confirm=1]` | Tags a reading with a profile name (see [Profiles](#profiles)). |
 
 ```bash
-curl http://127.0.0.1:8080/latest
-curl -o report.pdf "http://127.0.0.1:8080/report?period=30d"
+curl http://127.0.0.1:8080/api/v1/latest
+curl -o report.pdf "http://127.0.0.1:8080/api/v1/report?period=30d"
 ```
 
 **There's no TLS built in.** `host` defaults to `127.0.0.1` (loopback only)
 for a reason: don't bind it to `0.0.0.0` or a LAN-facing interface without
 putting a reverse proxy (with TLS and its own auth) in front of it. Setting
 `api.token` requires an `Authorization: Bearer <token>` header on every
-endpoint except `/health`, which is worth doing even on loopback if other
-local users/processes on the same host shouldn't see readings:
+endpoint except `/api/v1/health` and `/api/v1/capabilities`, which is worth
+doing even on loopback if other local users/processes on the same host
+shouldn't see readings:
 
 ```bash
-curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/latest
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:8080/api/v1/latest
 ```
 
 If `api.host` isn't a loopback address and `api.token` is blank, both
@@ -246,7 +250,7 @@ Two delivery paths, chosen automatically based on whether `[api]` is enabled:
 
 - **`[api]` enabled**: an [ntfy](https://ntfy.sh) notification (Android/iOS
   apps, or any browser) with one HTTP action button per name in
-  `profiles.names`. Tapping a button hits this API's `/assign-profile`
+  `profiles.names`. Tapping a button hits this API's `/api/v1/assign-profile`
   endpoint directly, tagging that specific reading. Requires
   `profiles.ntfy_url` (and `profiles.api_base_url` pointing at wherever the
   API is actually reachable from your phone/desktop; `127.0.0.1` only works
@@ -261,7 +265,7 @@ Two delivery paths, chosen automatically based on whether `[api]` is enabled:
   there.
 
 ```bash
-curl "http://127.0.0.1:8080/assign-profile?id=42&profile=Alice"
+curl "http://127.0.0.1:8080/api/v1/assign-profile?id=42&profile=Alice"
 ```
 
 If `profiles.assign_window_seconds` is set, this fails with `409` for a
@@ -271,7 +275,7 @@ reading someone's forgotten about) rather than a limit on manual
 corrections. Add `&confirm=1` to tag an old reading on purpose:
 
 ```bash
-curl "http://127.0.0.1:8080/assign-profile?id=42&profile=Alice&confirm=1"
+curl "http://127.0.0.1:8080/api/v1/assign-profile?id=42&profile=Alice&confirm=1"
 ```
 
 `--check-config` cross-checks `profiles.names` against the database: if a
