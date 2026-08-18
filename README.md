@@ -6,7 +6,7 @@ SQLite database. No cloud account, no companion app, no Home Assistant
 required.
 
 It's a thin wrapper around the
-[`etekcity-bp-ble`](https://github.com/bonelifer/etekcity-bp-ble) library,
+[`etekcity-bp-ble`](https://github.com/home-health-hub/etekcity-bp-ble) library,
 packaged to run unattended as a `systemd` service on something like a
 Raspberry Pi sitting near the monitor.
 
@@ -51,7 +51,7 @@ Requires Python 3.11+.
 ### Quick install
 
 ```bash
-git clone https://github.com/bonelifer/etekcity-bp-daemon.git
+git clone https://github.com/home-health-hub/etekcity-bp-daemon.git
 cd etekcity-bp-daemon
 sudo ./install.sh
 ```
@@ -236,7 +236,7 @@ this?" after each reading and tags it. The device's own user slot (0 or 1)
 can't be used for this: it only ever reports one of two values no matter
 how many people actually share the device, so it can't tell a third or
 fourth person apart from whoever normally uses that slot. This mirrors
-[`etekcity-scale-daemon`](https://github.com/bonelifer/etekcity-scale-daemon)'s
+[`etekcity-scale-daemon`](https://github.com/home-health-hub/etekcity-scale-daemon)'s
 profile system rather than relying on the device's hardware slots, so any
 number of people can share one monitor.
 
@@ -352,7 +352,7 @@ docker compose up -d
 ```
 
 Or use the prebuilt image instead of `docker compose build`'s local build:
-`ghcr.io/bonelifer/etekcity-bp-daemon:latest`. CI builds this image on every
+`ghcr.io/home-health-hub/etekcity-bp-daemon:latest`. CI builds this image on every
 push to `main`, runs `--check-config` and a report generation inside it, and
 pushes it to GHCR, so the image itself is exercised, but only its CLI
 tooling, not a live BLE connection (see below).
@@ -489,11 +489,11 @@ SQLite.
 
 ## Acknowledgments
 
-- Built on [`etekcity-bp-ble`](https://github.com/bonelifer/etekcity-bp-ble),
+- Built on [`etekcity-bp-ble`](https://github.com/home-health-hub/etekcity-bp-ble),
   which itself is based on the protocol decoding in
   [EdLeckert/ha_etekcity_blood_pressure_monitor](https://github.com/EdLeckert/ha_etekcity_blood_pressure_monitor).
 - Project layout modeled on
-  [`etekcity-scale-daemon`](https://github.com/bonelifer/etekcity-scale-daemon).
+  [`etekcity-scale-daemon`](https://github.com/home-health-hub/etekcity-scale-daemon).
 - Code review, implementation, and documentation assisted by
   [Claude](https://www.anthropic.com/claude).
 
@@ -501,8 +501,8 @@ SQLite.
 
 Contributions are welcome!
 
-- **Bug reports**: [Open an issue](https://github.com/bonelifer/etekcity-bp-daemon/issues).
-- **Everything else** (questions, feature requests, ideas, general discussion): [Use Discussions](https://github.com/bonelifer/etekcity-bp-daemon/discussions).
+- **Bug reports**: [Open an issue](https://github.com/home-health-hub/etekcity-bp-daemon/issues).
+- **Everything else** (questions, feature requests, ideas, general discussion): [Use Discussions](https://github.com/home-health-hub/etekcity-bp-daemon/discussions).
 - Pull requests are welcome for bug fixes or discussed features.
 
 ## License
