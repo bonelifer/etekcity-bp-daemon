@@ -10,7 +10,7 @@ readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.11"
 dependencies = [
-    "etekcity-bp-ble @ git+https://github.com/bonelifer/etekcity-bp-ble.git",
+    "etekcity-bp-ble @ git+https://github.com/home-health-hub/etekcity-bp-ble.git",
     "aiomqtt>=2.0.0,<3.0.0",
     "apprise>=1.0.0,<2.0.0",
     "aiohttp>=3.9.0,<4.0.0",
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bonelifer/etekcity-bp-daemon"
+Homepage = "https://github.com/home-health-hub/etekcity-bp-daemon"
 
 [project.scripts]
 etekcity-bp-daemon = "etekcity_bp_daemon.cli:main"
