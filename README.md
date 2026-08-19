@@ -1,5 +1,7 @@
 # etekcity-bp-daemon
 
+![etekcity-bp-daemon: blood pressure readings over Bluetooth to a local home server and database](docs/images/etekcity-bp-daemon-banner.png)
+
 A standalone Linux daemon that connects to an Etekcity Smart Blood Pressure
 Monitor over Bluetooth Low Energy (BLE) and logs its readings to a local
 SQLite database. No cloud account, no companion app, no Home Assistant
