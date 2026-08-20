@@ -3,8 +3,8 @@
 
 The schema here is duplicated from storage.py's _SCHEMA rather than
 imported, so this script has no dependency on the package being installed
-(the docker-build CI job runs it against a container image, not the host
-Python). Keep the two in sync if the readings table's columns change.
+(it's run standalone by scripts/smoke-test.sh, not through the package).
+Keep the two in sync if the readings table's columns change.
 """
 
 import sqlite3

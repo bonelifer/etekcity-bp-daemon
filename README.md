@@ -2,7 +2,7 @@
 
 ![etekcity-bp-daemon: blood pressure readings over Bluetooth to a local home server and database](docs/images/etekcity-bp-daemon-banner.png)
 
-![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white) ![Bash](https://img.shields.io/badge/shell-Bash-4EAA25?logo=gnu-bash&logoColor=white) ![Docker](https://img.shields.io/badge/container-Docker-2496ED?logo=docker&logoColor=white) ![Bluetooth LE](https://img.shields.io/badge/Bluetooth-LE-0082FC?logo=bluetooth&logoColor=white)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white) ![Bash](https://img.shields.io/badge/shell-Bash-4EAA25?logo=gnu-bash&logoColor=white) ![Bluetooth LE](https://img.shields.io/badge/Bluetooth-LE-0082FC?logo=bluetooth&logoColor=white)
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/home-health-hub/etekcity-bp-daemon/blob/main/LICENSE) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/home-health-hub/etekcity-bp-daemon#contributing) [![Discussions](https://img.shields.io/badge/discussions-welcome-blue)](https://github.com/home-health-hub/etekcity-bp-daemon/discussions)
 
@@ -347,29 +347,6 @@ None of this is required. A profile with no `[profile.<name>]` section at
 all still tags and reports/alerts normally, just without the
 personalization. `--check-config` validates every configured profile's
 section and reports how many parsed cleanly (`details_valid=N/M`).
-
-### Docker
-
-```bash
-mkdir -p config data
-cp config/etekcity-bp-daemon.ini.example config/config.ini
-"$EDITOR" config/config.ini
-docker compose up -d
-```
-
-Or use the prebuilt image instead of `docker compose build`'s local build:
-`ghcr.io/home-health-hub/etekcity-bp-daemon:latest`. CI builds this image on every
-push to `main`, runs `--check-config` and a report generation inside it, and
-pushes it to GHCR, so the image itself is exercised, but only its CLI
-tooling, not a live BLE connection (see below).
-
-BLE access from inside a container needs the host's D-Bus system bus and
-Bluetooth adapter, which `docker-compose.yml` reaches via `network_mode:
-host` and a `/var/run/dbus` bind mount. **This part is unverified**: BLE
-from containers is finicky across host setups, and the bare-metal `systemd`
-install is the well-tested path. If Docker doesn't see the adapter, try
-running the container with `--privileged` or check that BlueZ's D-Bus
-service is reachable at the mounted socket.
 
 ## Manual usage
 
